@@ -8,6 +8,15 @@ published: false
 
 雰囲気で使っていたuseStateの仕組みを理解するべくまとめてみました。
 
+# メモ
+- react18以前はバッチ処理の機能(バッチング)が限定されていたらしい！
+https://ja.react.dev/blog/2022/03/29/react-v18#suspense-in-data-frameworks
+- ソースコードについて1
+https://zenn.dev/rinda_1994/articles/bb656e2533894a
+- ソースコードについて2
+https://sbfl.net/blog/2019/02/09/react-hooks-usestate/
+- 処理の流れそれぞれは、ソースコードのどこに該当するか確認したい
+
 ## 処理の流れメモ
 set関数が呼ばれる
 ->「stateの更新」と「再レンダリング」がキューイングされる
@@ -29,7 +38,7 @@ https://zenn.dev/porokyu32/articles/960d9d6e45533b
 https://zenn.dev/ktmouk/articles/68fefedb5fcbdc
 これらを理解しないとこの公式ページのチャレンジ問題のsetTimeout終了前に画面更新が行われる理由が理解できないだろう
 https://ja.react.dev/learn/queueing-a-series-of-state-updates#challenges
-- 再レンダリングの後の仮想DOM作成は、再レンダリングという概念に含まれる？
+- 再レンダリングの後の仮想DOM作成は、再レンダリングという概念に含まれる?
 
 ## 学び
 - set->普通の処理(イベントハンドラやconsole.logなど)->state変更->再レンダリング->コンポーネント呼び出し->差分計算->仮想DOMを実DOMにコミット->ペイント(ここでUIがちゃんと変わってる)
