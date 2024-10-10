@@ -1,12 +1,10 @@
 ---
-title: "ReactのuseStateの内部構造を理解する"
+title: "useState(React) / set関数が呼ばれてからUIが変更されるまでに背後で何が起きているのか"
 emoji: "🎞️"
 type: "tech" # tech: 技術記事 / idea: アイデア
 topics: ["react", "usestate"]
 published: false
 ---
-
-雰囲気で使っていたuseStateの仕組みを理解するべくまとめてみました。
 
 # メモ
 - react18以前はバッチ処理の機能(バッチング)が限定されていたらしい！
@@ -16,6 +14,19 @@ https://zenn.dev/rinda_1994/articles/bb656e2533894a
 - ソースコードについて2
 https://sbfl.net/blog/2019/02/09/react-hooks-usestate/
 - 処理の流れそれぞれは、ソースコードのどこに該当するか確認したい
+
+
+## 疑問メモ
+- react fiberとは？
+https://zenn.dev/porokyu32/articles/960d9d6e45533b
+- fiberツリーとdomツリーの違いは？
+- キューのような動作をする(厳密にはキューではないのか？)、JSの概念としてマイクロタスクとマクロタスクがある
+https://zenn.dev/ktmouk/articles/68fefedb5fcbdc
+これらを理解しないとこの公式ページのチャレンジ問題のsetTimeout終了前に画面更新が行われる理由が理解できないだろう
+https://ja.react.dev/learn/queueing-a-series-of-state-updates#challenges
+- 再レンダリングの後の仮想DOM作成は、再レンダリングという概念に含まれる?
+- レンダリングとhot reloadって名前違うけどやってること全く一緒では？何が違う？
+- useEffectのクリーンアップ関数の意義は？どういう使い方？
 
 ## 処理の流れメモ
 set関数が呼ばれる
@@ -29,16 +40,6 @@ set関数が呼ばれる
 
 ->で、差分がなかった場合は
 差分があった場合は
-
-
-## 疑問メモ
-- react fiberとは？
-https://zenn.dev/porokyu32/articles/960d9d6e45533b
-- キューのような動作をする(厳密にはキューではないのか？)、JSの概念としてマイクロタスクとマクロタスクがある
-https://zenn.dev/ktmouk/articles/68fefedb5fcbdc
-これらを理解しないとこの公式ページのチャレンジ問題のsetTimeout終了前に画面更新が行われる理由が理解できないだろう
-https://ja.react.dev/learn/queueing-a-series-of-state-updates#challenges
-- 再レンダリングの後の仮想DOM作成は、再レンダリングという概念に含まれる?
 
 ## 学び
 - set->普通の処理(イベントハンドラやconsole.logなど)->state変更->再レンダリング->コンポーネント呼び出し->差分計算->仮想DOMを実DOMにコミット->ペイント(ここでUIがちゃんと変わってる)
