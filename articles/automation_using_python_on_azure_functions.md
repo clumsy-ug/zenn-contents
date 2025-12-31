@@ -1,6 +1,6 @@
 ---
 title: "（執筆中）Azure Functions + Python(openpyxl)で毎月のExcel集計を自動化した"
-emoji: "🎍"
+emoji: "📊"
 type: "tech"
 topics: ["azurefunctions", "python", "openpyxl", "excel"]
 published: true
