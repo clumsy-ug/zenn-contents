@@ -14,7 +14,7 @@ Pythonファイルに3時間分の苦悩(後述)を900行程で詰め込み、�
 
 今後は月に1度そのコンテナを見に行って、作成されているExcel(実体はBLOB)ファイルをダウンロードするだけで集計表が手に入る状態になりました。最高。
 
-GitHubにPythonファイルやrequirements.txtなどをまとめたプロジェクトを上げています。
+GitHubにPythonファイルやrequirements.txtなどをまとめたリポジトリを上げています。
 
 リンク張る
 
@@ -73,14 +73,14 @@ FROM [Employee-Table];
 
 7. それによってできた「NULLでない、正しい企業名/社員名が入ったエクセルシート」を、「NULLが混在している、データをそのまま貼り付けた状態のエクセルシート」から参照し、NULLを置き換える
     - Excelの[`VLOOKUP`](https://support.microsoft.com/ja-jp/office/vlookup-%E9%96%A2%E6%95%B0-0bbc8083-26fe-4963-8ab8-93a18ad188a1)関数を使用
-    - 余談ですが、このVLOOKUPの第四引数を省略してあいまい検索がかかってしまい、意図しない結果が入っていたことに1カ月後気づくという初歩的な[失態](https://x.com/clumsy_ug/status/2003330818111156456?s=46)を犯しました（泣）
+    - 余談ですが、このVLOOKUPの第四引数を省略してあいまい検索がかかってしまい、意図しない結果が入っていたことに1カ月後の集計時に気づくという[失態](https://x.com/clumsy_ug/status/2003330818111156456?s=46)を犯しました（泣）
 
 8. 以上で完成した各一覧表シートを基に、列ごとの合計値や平均値をとった結果を記載するサマリシートを複数作成
     - 厳密には、すでに作成されている各サマリシートに1列追加して、その月の分として新しい値を入力していく
     - Excelの`SUM`, `AVERAGE`関数を使用
 
 9.  各サマリシートを参照している各グラフシートの、データ範囲を1列分拡張する
-    - ひと月ごとに1列サマリシートの列が追加されていくため
+    - 毎月サマリシートに1列追加されていくため
 
 10. 完成
 
@@ -92,7 +92,7 @@ FROM [Employee-Table];
 
 ---
 
-これを部分的にでも可能な限り自動化したいと思い少しずつ試してみたら、最終的に完全自動化をすることができ、3時間が0になった(やったね)ので、その方法を説明します。
+これを部分的にでも可能な限り自動化したいと思い少しずつ試してみたら、最終的に完全自動化をすることができ3時間が0になったので、その方法を説明します。
 
 # プログラムの内容
 
@@ -111,9 +111,11 @@ def main_process():
     ...
 ```
 
-これをAzure Functionsの機能として提供されているTimer Triggerというものの最新である[バージョン2(v2)の記法](https://learn.microsoft.com/ja-jp/azure/azure-functions/functions-bindings-timer?tabs=python-v2%2Cisolated-process%2Cnodejs-v4&pivots=programming-language-python#example)を使って、自動で定期実行します。今回の例では毎月20日の午前4時にしています。
+これをAzure Functionsで提供されているTimer Triggerという機能の最新である[バージョン2(v2)の記法](https://learn.microsoft.com/ja-jp/azure/azure-functions/functions-bindings-timer?tabs=python-v2%2Cisolated-process%2Cnodejs-v4&pivots=programming-language-python#example)を使って、自動で定期実行します。今回の例では毎月20日の午前4時にしています。
 
 （Timer Triggerという機能がAzure Functionsにあるということは知っていましたが、GUI上でポチポチ設定するのではなく決まった書式でコードに落とし込むことで利用できる機能であるということを初めて知りました）
+
+公式の例に則り、以下のように書くことで定期実行されるようにします。
 
 ```python:function_app.py
 # schedule: "秒 分 時 日 月 曜日"
@@ -147,7 +149,7 @@ https://www.jisakeisan.com/?t1=utc&t2=jst
 
 ## 環境変数の取得
 
-ではmain_process内の処理を追っていきます。
+ではmain_process内の処理を1つずつ追っていきましょう。
 
 まず、Azureの環境変数を取得しつつ存在しない場合はエラーをメッセージと共にraiseするという関数を`get_env_or_raise`という名前で作成しています。
 
