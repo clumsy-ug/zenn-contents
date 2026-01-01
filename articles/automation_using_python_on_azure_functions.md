@@ -84,12 +84,11 @@ FROM [Employee-Table];
 
 10. 完成
 
-[^1]: [pandas](https://pandas.pydata.org/)の[`read_sql()`](https://pandas.pydata.org/docs/reference/api/pandas.read_sql.html)メソッドは、第一引数のSQLテキストを読み取り、実行までしてくれる便利なものですが、読み取れるSQLステートメントの数が最大1つまでという制約があります。例えば以下のコードはエラーになります。
+[^1]: [pandas](https://pandas.pydata.org/)の[`read_sql()`](https://pandas.pydata.org/docs/reference/api/pandas.read_sql.html)メソッドは、第一引数のSQLテキストを読み取り、実行までしてくれる便利なものですが、読み取れるSQLステートメントの数が最大1つまでという制約があります。例えば以下のコードはエラーになります。`USE`, `SELECT`という2つのステートメントがあるからですね。
     ```sql
     USE [Sample-Database];
     SELECT * FROM [Sample-Table];
     ```
-    そのため別データベースに接続するSQLは別ファイルに分離し、それぞれを別の`read_sql()`で実行する必要がありました。
 
 ---
 
