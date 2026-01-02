@@ -12,7 +12,7 @@ published: true
 
 Pythonファイルに3時間分の苦悩(後述)を900行程で詰め込み、それをAzure FunctionsのTimer Trigger機能で自動的に月一実行し、出力結果であるExcelファイルをAzure Blob Storageの指定したコンテナに格納します。
 
-今後は月に1度そのコンテナを見に行って、作成されているExcel(実体はBLOB)ファイルをダウンロードするだけで集計表が手に入る状態になりました。最高。
+今後は月に1度そのコンテナを見に行って、作成されているExcel(実体はBLOB)ファイルをダウンロードするだけで集計表が手に入る状態になりました。やったね。
 
 GitHubにPythonファイルやrequirements.txtなどをまとめたリポジトリを上げています。
 
@@ -121,12 +121,12 @@ def main_process():
 # schedule: "秒 分 時 日 月 曜日"
 # Asia/Tokyoで毎月20日の4:00に実行したい -> UTCだと9時間前なので19日の19:00になる
 @app.schedule(
-        schedule="0 0 19 19 * *",
-        # schedule="0 0 */2 * * *",  # デバッグ用: 2時間おきに実行
-        # schedule="0 0 * * * *",  # デバッグ用: 1時間おきに実行
-        arg_name="myTimer",
-        run_on_startup=False,
-        use_monitor=False
+    schedule="0 0 19 19 * *",
+    # schedule="0 0 */2 * * *",  # デバッグ用: 2時間おきに実行
+    # schedule="0 0 * * * *",  # デバッグ用: 1時間おきに実行
+    arg_name="myTimer",
+    run_on_startup=False,
+    use_monitor=False
 ) 
 def monthly_processing(myTimer: func.TimerRequest) -> None:
     logging.info('Python timer trigger function started.')
@@ -160,7 +160,7 @@ openpyxl==3.1.5
 azure-functions==1.24.0
 ```
 
-同じバージョンで一括インストールするには以下を実行してください。
+同じバージョンで一括インストールするには以下を実行します。
 ```bash
 pip install requests==2.32.5 pyodbc==5.3.0 pandas==2.3.3 azure-storage-blob==12.27.1 openpyxl==3.1.5 azure-functions==1.24.0
 ```
@@ -333,8 +333,8 @@ def download_sql_text(sql_url: str) -> list[str]:
     return response.text
 
 def execute_sql_to_df(
-        conn_str: str,
-        sql_text: str
+    conn_str: str,
+    sql_text: str
 ) -> pd.DataFrame:
     """pyodbc経由でSQLを実行してpandas.DataFrameを返す。"""
 
@@ -393,9 +393,9 @@ def main_process():
 
 また実行によるログを見るために[Application Insights](https://learn.microsoft.com/ja-jp/azure/azure-monitor/app/app-insights-overview)を有効にしているのですが、そこにログとして出力させるには`logging.info()`をする必要があり、`logging`も`import`しています。
 
-`basename_df_list`はこの後にNULLを置き換えたり、実際にExcelシートとして作り上げていく時に使用されます。
+`basename_df_list`はこの後にNULLを置き換えたり、実際にExcelシートとして作り上げていく時に使用します。
 
-`basename_df_list[0]`がシート名の一部として、`basename_df_list[1]`がそのシートのデータを表現しているDataFrameとして使用されます。
+`basename_df_list[0]`はシート名の一部として、`basename_df_list[1]`はそのシートのデータを表現しているDataFrameとして使用します。
 
 なのでそのbasename_df_listを作り上げるためのループになります。
 
@@ -557,7 +557,9 @@ def replace_null(
 
 という、単純なロジックでNULLを置換しています。
 
-恐らくもっと効率化したコードにできると思います。今回はあえて愚直で素直なアルゴリズムを自力で実装してみたくなったので甘えました。
+恐らくもっと効率化したコードにできると思います。今回はあえて愚直で素直なアルゴリズムを自力で実装してみたくなったのでそうしました。
+
+これで、`VLOOKUP`でやっていたNULL置換部分を自動化することに成功しました。
 
 ## 5. ああ
 
