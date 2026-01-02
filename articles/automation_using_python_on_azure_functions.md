@@ -316,7 +316,7 @@ def main_process():
     ...
 ```
 
-## 2. 実データを取得->DFに変換
+## 2. 実データを取得→DFに変換
 
 ```python:function_app.py
 import requests
@@ -399,7 +399,7 @@ def main_process():
 
 なのでそのbasename_df_listを作り上げるためのループになります。
 
-## 3. 正しい名前が入ったデータを取得->DFに変換
+## 3. 正しい名前が入ったデータを取得→DFに変換
 
 ```python:function_app.py
 def main_process():
