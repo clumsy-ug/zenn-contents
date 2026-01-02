@@ -147,7 +147,25 @@ https://www.jisakeisan.com/?t1=utc&t2=jst
 
 また、後述しますがPythonファイル内でも`datetime.now()`を使っている箇所があり、これだとUTC時間で認識されてしまうので、好きなタイムゾーンを指定できる[ZoneInfo](https://docs.python.org/ja/3/library/zoneinfo.html)というPythonライブラリを`datetime.now()`の引数で使用することで正確に`Asia/Tokyo`のタイムゾーンで認識できるようにしました。
 
-## 環境変数の取得
+---
+
+なお、今回使用するライブラリは以下です。
+
+```txt:requirements.txt
+requests==2.32.5
+pyodbc==5.3.0
+pandas==2.3.3
+azure-storage-blob==12.27.1
+openpyxl==3.1.5
+azure-functions==1.24.0
+```
+
+同じバージョンで一括インストールするには以下を実行してください。
+```bash
+pip install requests==2.32.5 pyodbc==5.3.0 pandas==2.3.3 azure-storage-blob==12.27.1 openpyxl==3.1.5 azure-functions==1.24.0
+```
+
+## 1. 環境変数の取得
 
 ではmain_process内の処理を1つずつ追っていきましょう。
 
@@ -167,6 +185,9 @@ def get_env_or_raise(key: str) -> str:
     return value
 
 def main_process():
+
+    ...
+
     # ---環境変数を取得---
 
     # Azure Blob Storageのコンテナ内にある、各SQLファイルのURL
@@ -245,7 +266,7 @@ def main_process():
     username_3 = get_env_or_raise('USERNAME_3')
     password_3 = get_env_or_raise('PASSWORD_3')
 
-    box_conn_str = (
+    conn_str_3 = (
         f'DRIVER={driver};'
         f'SERVER={server_3};'
         f'DATABASE={database_3};'
@@ -295,6 +316,250 @@ def main_process():
     ...
 ```
 
+## 2. 実データを取得->DFに変換
+
+```python:function_app.py
+import requests
+import pandas as pd
+import logging
+
+def download_sql_text(sql_url: str) -> list[str]:
+    """指定URLからSQLテキストをダウンロードして返す。"""
+
+    # timeoutはblobからsqlファイルをダウンロード完了するまでの制限時間
+    response = requests.get(sql_url, timeout=600)
+    response.raise_for_status()
+    response.encoding = response.encoding or 'utf-8'
+    return response.text
+
+def execute_sql_to_df(
+        conn_str: str,
+        sql_text: str
+) -> pd.DataFrame:
+    """pyodbc経由でSQLを実行してpandas.DataFrameを返す。"""
+
+    # timeoutはクエリ実行から完了までの制限時間
+    # autocommitはfalseでok（SELECTのみであればsqlのcommit()不要なので）
+    with pyodbc.connect(conn_str, autocommit=False, timeout=600) as conn:
+        df = pd.read_sql(sql_text, conn)
+        df = df.fillna('NULL')
+    
+    return df
+
+def main_process():
+
+    ...
+
+    # ベース名とそれに対応するdataframeを保持するタプルを、0個以上保持するリスト
+    basename_df_list: list[tuple[str, pd.DataFrame]] = []
+
+    # データ取得のループ
+    for sql_url, base_name in SQL_FILES:
+        logging.info(f"SQL_FILESループ -> {sql_url}")
+        
+        try:
+            sql_text = download_sql_text(sql_url)
+        except Exception as e:
+            logging.error(f"エラー: download_sql_text()に失敗しました: {sql_url}")
+            logging.error(f"エラー内容: {e}")
+            continue
+
+        if '1' in base_name:
+            conn_str = conn_str_1
+        elif '2' in base_name:
+            conn_str = conn_str_2
+        else:
+            conn_str = conn_str_3
+
+        try:
+            df = execute_sql_to_df(conn_str, sql_text)
+        except Exception as e:
+            logging.error(f"エラー! execute_sql_to_df()に失敗しました: {base_name}")
+            logging.error(f"エラー内容: {e}")
+            basename_df_list.append((f"エラー_{base_name}", None))
+            continue
+
+        basename_df_list.append((base_name, df))
+        logging.info('現在のループ内の処理正常終了')
+
+        ...
+```
+
+先ほど作成したSQL_FILESの中をループしています。
+
+まず`download_sql_text()`でSQLそのものをstringとして受け取るためにダウンロードし、それを基に実際に`execute_sql_to_df()`でSQL実行とdataframeへの変換まで行います。
+
+今回、SQLの実行結果を毎回Excelに直接書き込みすると恐らくオーバーヘッドが凄いので、中間状態としてpandasのDataFrameとしてデータを保持しておき、加工が終わったらそれを一気にExcelに書き込む、という形をできる限り行っています。
+
+また実行によるログを見るために[Application Insights](https://learn.microsoft.com/ja-jp/azure/azure-monitor/app/app-insights-overview)を有効にしているのですが、そこにログとして出力させるには`logging.info()`をする必要があり、`logging`も`import`しています。
+
+`basename_df_list`はこの後にNULLを置き換えたり、実際にExcelシートとして作り上げていく時に使用されます。
+
+`basename_df_list[0]`がシート名の一部として、`basename_df_list[1]`がそのシートのデータを表現しているDataFrameとして使用されます。
+
+なのでそのbasename_df_listを作り上げるためのループになります。
+
+## 3. 正しい名前が入ったデータを取得->DFに変換
+
+```python:function_app.py
+def main_process():
+
+    ...
+
+    # 名前情報を格納する4つのdfを格納するリスト
+    """
+    ループの流れ
+    1回目: 企業コード(1), 企業名(1)
+    2回目: 社員コード(1), 社員名(1)
+    3回目: 企業コード(2), 企業名(2)
+    4回目: 社員コード(2), 社員名(2)
+    """
+    names_df_list: list[pd.DataFrame] = []
+
+    # 名前取得のループ
+    for sql_url, base_name in GETNAME_SQL_FILES:
+        logging.info(f"GETNAME_SQL_FILESループ -> {sql_url}")
+
+        # 実行したいsql文をダウンロード
+        try:
+            sql_text = download_sql_text(sql_url)
+        except Exception as e:
+            logging.error(f"エラー! download_sql_text()に失敗しました: {sql_url} : {e}")
+
+        if '1' in base_name:
+            conn_str = getname_conn_str_1
+        elif '2' in base_name:
+            conn_str = getname_conn_str_2
+
+        # dfのNULLになっている名前を置き換えるための名前情報が含まれたdfを作成
+        try:
+            names_df = execute_sql_to_df(conn_str, sql_text)
+            names_df_list.append(names_df)
+        except Exception as e:
+            logging.error(f"エラー! execute_sql_to_df()に失敗しました: {sql_url}")
+            logging.error(f"エラー内容: {e}")
+
+        ...
+```
+
+今度はGETNAME_SQL_FILESの中をループしますが、やっていることは同じです。
+
+作られるのが実データのようにNULLが混在したものではなく、しっかりと名前が入ったデータです。
+
+それをDataFrameとして保持しています。
+
+SQL実行結果であるDataFrameを、names_df_listにどんどん追加しています。
+
+## 4. NULLを置換
+
+先ほどのGETNAME_SQL_FILES内のループはまだ続いています。
+
+データは揃ったので、実際にNULLを置き換えます。
+（以前までExcel内でVLOOKUP関数を使っていた箇所です）
+
+```python:function_app.py
+def main_process():
+    
+    ...
+
+    for sql_url, base_name in GETNAME_SQL_FILES:
+        
+        ...    
+
+        # dfのNULLをnames_dfによって置き換え
+        try:
+            # 1回目のループ: 1(企業名取得)
+            if sql_url == GETNAME_SQL_FILES[0][0]:
+                df = basename_df_list[0][1]
+                replace_null(df, names_df_list, 0, '企業コード', '企業名')
+        except Exception as e:
+            logging.error(f"エラー! 1巡目のreplace_null()に失敗しました: {sql_url}")
+            logging.error(f"エラー内容: {e}")
+
+        try:
+            # 2回目のループ: 1(企業名&社員名取得)
+            if sql_url == GETNAME_SQL_FILES[1][0]:
+                df = basename_df_list[1][1]
+                replace_null(df, names_df_list, 0, '企業コード', '企業名')
+                replace_null(df, names_df_list, 1, '社員コード', '社員名')
+        except Exception as e:
+            logging.error(f"エラー! 2巡目のreplace_null()に失敗しました: {sql_url}")
+            logging.error(f"エラー内容: {e}")
+
+        try:
+            # 3回目のループ: 2(企業名取得)
+            if sql_url == GETNAME_SQL_FILES[2][0]:
+                df = basename_df_list[2][1]
+                replace_null(df, names_df_list, 2, '企業コード', '企業名')
+        except Exception as e:
+            logging.error(f"エラー! 3巡目のreplace_null()に失敗しました: {sql_url}")
+            logging.error(f"エラー内容: {e}")
+
+        try:
+            # 4回目のループ: 2(企業名&社員名取得)
+            if sql_url == GETNAME_SQL_FILES[3][0]:
+                df = basename_df_list[3][1]
+                replace_null(df, names_df_list, 2, '企業コード', '企業名')
+                replace_null(df, names_df_list, 3, '社員コード', '社員名')
+        except Exception as e:
+            logging.error(f"エラー! 4巡目のreplace_null()に失敗しました: {sql_url}")
+            logging.error(f"エラー内容: {e}")
+
+        logging.info('現在のループ内の処理終了')
+```
+
+main_process内の処理はほぼ`replace_null`関数を実行して、`names_df_list`内の各`names_df`を参照することで`df`のnullを置き換えているだけです。
+
+そのため`replace_null`の中身を見てみましょう。
+
+```python:function_app.py
+def replace_null(
+    df: pd.DataFrame,
+    names_df_list: list[pd.DataFrame],
+    names_df_order: int,
+    code_column: str,
+    name_column: str
+) -> None:
+    """1と2の企業名/社員名 のNULLになっている箇所を正確な名前に置き換える"""
+
+    for n in range(len(df)):
+        if df.at[n, name_column] == 'NULL':
+            code_that_have_null_name = df.at[n, code_column]
+            names_df = names_df_list[names_df_order]
+
+            # bool_series_whether_match_code は [False, False, True, False] のような pd.Series
+            bool_series_whether_match_code = names_df[code_column] == code_that_have_null_name
+            del_indexes = names_df.index[bool_series_whether_match_code]
+            
+            if len(del_indexes) == 0:
+                logging.info(f'NULLの名前を持つ{code_column} {code_that_have_null_name} が名前取得用のdfには存在しなかったため、dfの該当セルがある行は削除します。')
+                # 1で削除された社員は物理削除になる仕様で正しい接続先DBにも存在しなくなっているので、集計対象外としてレコードごと削除
+                df.drop(n, inplace=True)
+            else:
+                # DBの仕様上1つしかないのが確定しているので[0]と断定してOK
+                del_index = del_indexes[0]
+                correct_name = names_df.at[del_index, name_column]
+                df.at[n, name_column] = correct_name
+```
+
+処理の流れは以下です。
+
+- df(実データ)内を1行ずつループ
+- dfの現在のループ行の該当の列(企業名か社員名が入っている列)の値がNULLだった場合のみ処理する
+  - そうでない場合は何もしない
+- dfの現在のループ行の企業コードor社員コードを、`code_that_have_null_name`として保持
+- dfに対応する正しい情報を持つdfを、`names_df`として保持
+- 先ほどdf内でNULLの値を持っていたコードと一致するかどうかを、names_dfの各コードで検査し、それぞれの結果がbool値になったものをpandas.Series型の`bool_series_whether_match_code`に保持
+- そのSeries内でtrueになっている部分のindexを、`pandas.Index`型の`del_indexes`として保持
+  - DBの仕様上、各コードは一意であるので、trueは返るとしても1つだけ
+- `len(del_indexes)`が0であった場合、trueが1つもなかった、つまりdfではNULLの名前を持つコードがあるがそのコードがnames_dfには存在しないという場合、仕様上サービス上でそのデータの物理削除が行われたということになるので、そもそも集計対象外にするということで`df.drop`で行削除して終了
+- `len(del_indexes)`が0でなかった場合、trueが1つ以上(実際は1つであることが確定している)あった、かつそのコードがnames_dfにちゃんと存在しているということになるので、NULLを置換
+
+という、単純なロジックでNULLを置換しています。
+
+恐らくもっと効率化したコードにできると思います。今回はあえて愚直で素直なアルゴリズムを自力で実装してみたくなったので甘えました。
+
+## 5. ああ
 
 # 下書きメモ
 
@@ -303,8 +568,6 @@ def main_process():
 - 最初matplotlibで図を作ろうとしていたが、既存のexcelの図をopenpyxlで取得していじるところまでやっちゃえば良いことに気づいて楽にグラフを拡張できてよかった。スタイル引き継げるのが良い
 
 - 最初はローカルでこういう風に実行して試してた。毎回sql走って実行を5~10分待つのが面倒だったが、本番に近い状態で正常に実行されるか常に確認しておきたかったので我慢した
-
-- 最後の方は急いでいてリファクタしてないのだが、ご愛嬌
 
 - 余談だがexcelなどのmsアプリのファイルは内部でxmlになっていること、だからこそ .xlsx / .docx / .pptx のxはxmlのxとして使われていること、を知った。で、グラフのタイトルが消えてしまうときとかにxmlの中身を見に行ってxmlが存在しないからxmlとは違って内部キャッシュを恐らくexcelはもっていてそこが消えてしまったんだろうとかそういうアタリをつけられて、楽しかった。実際に1文字消す、戻す、とやってxmlにそれが認識されていることを確認し、再度実行したらちゃんと直ったので、良かった。
  
