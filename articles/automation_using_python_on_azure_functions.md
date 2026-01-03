@@ -561,7 +561,67 @@ def replace_null(
 
 これで、`VLOOKUP`でやっていたNULL置換部分を自動化することに成功しました。
 
-## 5. ああ
+## 5. コンテナクライアントの初期化
+
+```python:function_app.py
+from azure.storage.blob import BlobServiceClient
+
+def main_process():
+
+    ...
+
+    # Azureとの接続関連
+    CONNECTION_STRING = get_env_or_raise('CONNECTION_STRING')
+    CONTAINER_NAME = get_env_or_raise('CONTAINER_NAME')
+    EXCEL_FILE_NAME_PREFIX = get_env_or_raise('EXCEL_FILE_NAME_PREFIX')
+
+    # クライアントの初期化
+    blob_service_client = BlobServiceClient.from_connection_string(
+        CONNECTION_STRING,
+        connection_timeout=600,  # 接続確立までの待機秒数
+        read_timeout=600,  # データ読み込みの待機秒数
+        retry_total=5  # 失敗時のリトライ回数
+    )
+    container_client = blob_service_client.get_container_client(CONTAINER_NAME)
+
+    ...
+```
+
+今回、最終出力は.xlsxにしたいのですが、それを作るために素材として利用する前月分の.xlsxを読み取ったり、新しい月の分を書き込んだり、完成したものをアップロードするために、Azure Blob Storageのコンテナに接続する必要があります。
+
+接続文字列などを環境変数から取得し、それを利用してコンテナに接続するためのクライアントを`container_client`という名前で初期化します。
+
+## 6. ブロブクライアントの初期化
+
+```python:function_app.py
+def main_process():
+
+    ...
+
+    # 最新(先月20日時点)のエクセルを見つける
+    # それより前の月のエクセルはファイル名に_oldをつけてアーカイブ扱いしているので、_oldがないものが最新ということになる
+    # まず.sqlファイルは無視してエクセルだけlistに格納していく
+    blobs = list(container_client.list_blobs(name_starts_with=EXCEL_FILE_NAME_PREFIX))
+
+    # listに格納されたエクセルの中から最新のものを見つける
+    for blob in blobs:
+        if '_old' not in blob.name:
+            latest_excel_blob_name = blob.name
+            break
+
+    # Blobからエクセルファイルを仮想メモリにダウンロード
+    # pd.read_excel()だけで済ませてしまうと、エクセルとして持ってくるのではなく中身のデータしか持ってこないからデザインが消えたり色々な問題があるのでバイトで扱う。その後にピンポイントでデータを置き換えたいところでだけpandas使用していく
+    # get_blob_clientはgetというよりcreateが実態に近い
+    blob_client = container_client.get_blob_client(latest_excel_blob_name)
+
+    ...
+```
+
+まず、集計月の1月前のExcel、つまり現時点では最新のExcelのファイル名を`latest_excel_blob_name`として取得します。
+
+そしてそのファイル名のblobを操作する窓口であるクライアントを、`blob_client`として作成します。
+
+## 7. ああ
 
 # 下書きメモ
 
