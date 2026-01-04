@@ -94,11 +94,11 @@ FROM [Employee-Table];
 
 これを部分的にでも可能な限り自動化したいと思い少しずつ試してみたら、最終的に完全自動化をすることができ3時間が0になったので、その方法を説明します。
 
-# プログラムの内容
+# プログラムの解説
 
 
 ## Pythonファイル
-作ったPythonファイルはこちらです。
+Pythonファイルの完成版はこちらです。
 
 リンク張る。
 
@@ -600,7 +600,6 @@ def main_process():
 
     # 最新(先月20日時点)のエクセルを見つける
     # それより前の月のエクセルはファイル名に_oldをつけてアーカイブ扱いしているので、_oldがないものが最新ということになる
-    # まず.sqlファイルは無視してエクセルだけlistに格納していく
     blobs = list(container_client.list_blobs(name_starts_with=EXCEL_FILE_NAME_PREFIX))
 
     # listに格納されたエクセルの中から最新のものを見つける
@@ -621,7 +620,74 @@ def main_process():
 
 そしてそのファイル名のblobを操作する窓口であるクライアントを、`blob_client`として作成します。
 
-## 7. ああ
+コメントにも書いた通りですが、以下が注意点です。
+
+- `get_blob_client()`ではなく`pd.read_excel()`だけで済ませてしまうと、エクセルとして持ってくるのではなく中身のデータしか持ってこないためデザインが消えたり色々な問題があるのでバイトで扱う
+  - その後にピンポイントでデータを置き換えたいところでだけpandasを使用
+- get_blob_clientはgetというよりcreateが実態に近い
+
+## 7. Workbook作成
+
+```python:function_app.py
+from openpyxl import load_workbook
+import io
+
+def main_process():
+
+    ...
+
+    # メモリ上に空の仮想ファイルを作成
+    # コンピュータのディスク(HDD/SSD)ではなくメモリ(RAM)に作成される
+    download_stream = io.BytesIO()
+
+    # クラウドからデータをダウンロードし、仮想ファイルに流し込む(書き込む)
+    blob_client.download_blob().readinto(download_stream)
+
+    # 読み取り位置(カーソル)が最後になっているので、先頭(0バイト目)に戻す
+    # これをやらないと pd.read_excel(download_stream) などやってもデータが空と判断されてエラーになる
+    download_stream.seek(0)
+
+    # excelの基になるbookを作成
+    book = load_workbook(download_stream)
+    output_stream = io.BytesIO()
+
+    ...
+```
+
+以下を行っています。
+
+- 空の仮想ファイルを`BytesIO`型(バイト列 / バイナリ)の`download_stream`として作成
+- 先ほど作成したblob_clientを使って実際にblobの中身(データ)を取得し、それをdownload_streamに流し込む
+- `download_stream`の読み取り位置(カーソル)を先頭に戻す
+  - これをやらないと`download_stream`の末尾つまりデータが無いところから読み込もうとしてしまいエラーになる
+- [openpyxl](https://pypi.org/project/openpyxl/)のload_workbook関数の引数にバイト列のdownload_streamを入れ実行することで、返り値として`openpyxl.Workbook`型の`book`を取得
+    - [こちら](https://note.nkmk.me/python-openpyxl-usage/)の説明にあるような`openpyxl.load_workbook('data/src/sample.xlsx')`という形で、`load_workbook`の引数にはExcelファイルの物理パスを入れても良いですが、ファイルライクなオブジェクト(`BytesIO`などのバイナリストリーム)も受け付けるように作られているので問題ありません
+- 最後に、最終出力用のバイナリストリームであるoutput_streamも初期化しておく
+
+blobをダウンロードしてそれをわざわざバイナリという中間表現に一旦落とし込んで、今度はそれをopenpyxlの`Workbook`という形に変換する、という手間をしています。
+
+一見、お目当てのblobを`download_blob`で取得して終わりに出来たら楽そうですが、残念ながらできません。
+
+`BlobClient.download_blob()`の返り値は`StorageStreamDownloader[bytes]`というもので、これはExcelのデータそのものでも、バイナリでもなく、ダウンロードを管理する専用のオブジェクトでしかないからです。
+
+```python:_blob_client.py
+class BlobClient(StorageAccountHostsMixin, StorageEncryptionMixin):
+    ...
+    @overload
+    def download_blob(
+        self, offset: Optional[int] = None,
+        length: Optional[int] = None,
+        *,
+        encoding: None = None,
+        **kwargs: Any
+    ) -> StorageStreamDownloader[bytes]:
+        ...
+```
+
+なので後からお目当てのblob(excel)ファイルを操作したい場合、`StorageStreamDownloader`として状態を保持していてもしょうがない(操作できない)ので、`openpyxl.Workbook`という状態(型)にしておきたい訳ですが、そのためには今回のケースだと一旦バイナリという状態を挟む必要があるので、まず`StorageStreamDownloader`をバイナリストリームにし、それを更に`Workbook`にしている、という流れになります。
+
+## 8. ああ
+
 
 # 下書きメモ
 
@@ -635,4 +701,4 @@ def main_process():
  
  - 集計表がおかしいとか、ある時点での集計表をもう一度見たいとか、集計表を見る営業サイドだけでなく開発サイド(主に私)も過去の集計表が見たいということで、月ごとの集計表はファイル名の末尾に`_old`をつけて一応スナップショットとして保存しておくことにしている
 
-- 単語のリンクをハイパーリンクでのせるべきところはのせとく
+- importするやつ全部できてるか確認
