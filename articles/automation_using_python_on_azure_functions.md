@@ -845,11 +845,218 @@ def apply_column_style(
 第一引数は変更を加えるワークシートそのものです。
 
 そしてそれらの列ごとに、行ループ->セルループ と二重ループし、セルごとに書式を整えています。
-右揃えにするセルは、3桁ごとにカンマを打つ数字として扱いたいので、その書式指定も行っています。
+右揃えにするセルは3桁ごとにカンマを打つ数字として扱いたいので、その書式指定も行っています。
 
 列単位で一気に書式設定できれば楽かつ直感的ですが、なぜか効かなかったためこのやり方にしています。
 
-## 9. ああ
+## 9. サマリ作成
+
+```python:function_app.py
+from openpyxl import Workbook  # load_workbookの返り値bookの型を表現するときにのみ使う
+
+def main_process():
+
+    ...
+
+    # ---サマリ(6シート)の作成---
+    logging.info('「【サマリ】1(企業)」に1列追加中...')
+    add_new_column_to_summarysheet_about_number_of_company(
+        basename_df_list[1][1],
+        book,
+        '【サマリ】1(企業)',
+    )
+
+    logging.info('「【サマリ】1(社員)」に1列追加中...')
+    add_new_column_to_summarysheet_about_number_of_employee(
+        basename_df_list[0][1],
+        basename_df_list[1][1],
+        book,
+        '【サマリ】1(社員)',
+    )
+
+    logging.info('「【サマリ】2(企業)」に1列追加中...')
+    add_new_column_to_summarysheet_about_number_of_company(
+        basename_df_list[3][1],
+        book,
+        '【サマリ】2(企業)',
+    )
+
+    logging.info('「【サマリ】2(社員)」に1列追加中...')
+    add_new_column_to_summarysheet_about_number_of_employee(
+        basename_df_list[2][1],
+        basename_df_list[3][1],
+        book,
+        '【サマリ】2(社員)',
+    )
+
+    logging.info('「【サマリ】3(企業)」に1列追加中...')
+    add_new_column_to_summarysheet_about_number_of_employee(
+        basename_df_list[5][1],
+        book,
+        '【サマリ】3(企業)'
+    )
+
+    logging.info('「【サマリ】3(社員)」に1列追加中...')
+    add_new_column_to_summarysheet_about_number_of_employee(
+        None,
+        basename_df_list[5][1],
+        book,
+        '【サマリ】3(社員)'
+    )
+
+    ...
+```
+
+`add_new_column_to_summarysheet_about_number_of_employee`, `add_new_column_to_summarysheet_about_number_of_employee`関数は既存のサマリシート(計6シート)に新しい列を追加し、そこに集計月の新しい値を入れていく処理をしています。
+
+それぞれの関数の実装は以下です。
+
+```python:function_app.py
+from openpyxl.utils import get_column_letter
+
+date_of_execution = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y/%m/%d')
+
+def add_new_column_to_summarysheet_about_number_of_company(
+    target_df: pd.DataFrame,
+    book: Workbook,
+    summary_sheetname: str,
+) -> None:
+    """【サマリ】1,2,3(企業)を作成"""
+
+    try:
+        # 参照渡しなので、これ以降summary_sheetを変更したらbookを変更したことにもなる
+        summary_sheet = book[summary_sheetname]
+        
+        # 最後の列の番号を取得する (例: c列までデータがあれば、max_columnは3になる)
+        last_col_number = summary_sheet.max_column
+        # その次の列の番号(ここに今月分の値を代入していく)
+        target_col_number = last_col_number + 1
+
+        target_letter = get_column_letter(target_col_number)
+
+        # 列の幅は25.75で固定（実際はなぜか25.17になる）
+        summary_sheet.column_dimensions[target_letter].width = 25.75
+
+        set_value_and_copy_style(summary_sheet, 4, target_col_number, date_of_execution)
+
+        total_number_of_employees = target_df['社員数'].sum()
+        set_value_and_copy_style(summary_sheet, 5, target_col_number, total_number_of_employees)
+
+        # ...
+
+        # サマリシートの各テーブル範囲を1列増やす
+        expand_table_range(summary_sheet)
+    except Exception as e:
+        logging.error(f"「{summary_sheetname}」シートへの書き込みもしくは値の計算に失敗しました: {e}")
+
+def add_new_column_to_summarysheet_about_number_of_employee(
+    target_df_user: pd.DataFrame | None,  # 3では使用しないためNoneで呼び出す
+    target_df_office: pd.DataFrame,
+    book: Workbook,
+    summary_sheetname: str,
+) -> None:
+    """【サマリ】1,2,3(社員)を作成"""
+
+    try:
+        summary_sheet: Worksheet = book[summary_sheetname]
+
+        last_col_number = summary_sheet.max_column
+        target_col_number = last_col_number + 1
+
+        target_letter = get_column_letter(target_col_number)
+        summary_sheet.column_dimensions[target_letter].width = 25.75
+
+        set_value_and_copy_style(summary_sheet, 4, target_col_number, date_of_execution)
+
+        total_number_of_assigned_tasks = target_df_office['担当業務数'].mean()
+        set_value_and_copy_style(summary_sheet, 5, target_col_number, total_number_of_assigned_tasks)
+
+        total_number_of_xxx =   target_df_user['xxx'].sum()
+        set_value_and_copy_style(summary_sheet, 12, target_col_number, total_number_of_xxx)
+
+        # ...
+
+        expand_table_range(summary_sheet)
+    except Exception as e:
+        logging.error(f"「{summary_sheetname}」シートへの書き込みもしくは値の計算に失敗しました: {e}")
+```
+
+現在値の入っている最終列の文字(`E`, `F`など)が何なのかがわかればその次の列から値を挿入していくことができるので、`get_column_letter`を使用して`target_letter`として保持しています。
+
+そしてdfの該当列の`sum()`や`mean()`をして、その結果を挿入するために`set_value_and_copy_style`をしています。
+
+また、サマリはいくつかのテーブルとして作成しているので、最後に`expand_table_range`で1列分テーブル範囲を拡張しています。
+
+まず`set_value_and_copy_style`を見てみましょう。
+
+```python:function_app.py
+from copy import copy
+
+def set_value_and_copy_style(
+    summary_sheet: Worksheet,
+    row: int,
+    col: int,
+    value: int | float  # sum()の返り値はAnyという仕様らしいが今回はint,もしくはfloatと断言して良いはず
+) -> None:
+    """指定したセルに値を書き込み、すぐ左の列(col-1)のセルから書式(フォント、罫線、塗りつぶし、表示形式、配置)をコピー"""
+
+    # セルへの値の書き込み(Setter的な使い方)
+    cell = summary_sheet.cell(row=row, column=col, value=value)
+
+    # セルの値の取得(Getter的な使い方。書き込みは行われない)
+    source_cell = summary_sheet.cell(row=row, column=col - 1)
+    
+    if source_cell.has_style:
+        cell.font = copy(source_cell.font)  # フォント
+        cell.border = copy(source_cell.border)  # 白い罫線(グリッド線)
+        cell.fill = copy(source_cell.fill)  # 塗りつぶし(背景色)
+        cell.number_format = copy(source_cell.number_format)  # カンマ区切り
+        cell.protection = copy(source_cell.protection)  # シート保護やセルのロック
+        cell.alignment = copy(source_cell.alignment)  # 配置(右揃え など)
+```
+
+値を挿入した後、書式を左隣のセル(前月時点の最終列の値)からコピーしています。
+
+次に`expand_table_range`は以下です。
+
+```python:function_app.py
+from openpyxl.utils.cell import range_boundaries
+
+def expand_table_range(ws: Worksheet) -> None:
+    """
+    サマリシート内の各テーブル範囲(ref)を拡張し、不足している列定義(TableColumn)を追加する。
+    TableColum追加まで行わないと「ファイルが破損しています」というエラーになる。
+    """
+
+    for table in ws.tables.values():
+        min_col, min_row, max_col, max_row = range_boundaries(table.ref)
+
+        # 1. 範囲（ref）の更新
+        new_ref = f"{get_column_letter(min_col)}{min_row}:{get_column_letter(max_col + 1)}{max_row}"
+        table.ref = new_ref
+
+        # 2. オートフィルタの範囲更新（設定されている場合）
+        if table.autoFilter:
+            table.autoFilter.ref = new_ref
+
+        # 3. 列定義（TableColumn）の追加
+        # idはユニークである必要がある
+        current_id = len(table.tableColumns) + 1
+
+        # ヘッダー行(min_row)の最終列(今回挿入した新しい列)のセルから値を取得して、列名にする。つまり最新の 年/月/日 になる
+        # テーブルの列名は必須であり、かつ重複してはいけない
+        # nameは日付型などではなく文字列型が必須のため str() で変換する
+        header_val = ws.cell(row=min_row, column=max_col + 1).value
+        str_header_val = str(header_val)
+        
+        # 定義を作成して追加
+        new_col = TableColumn(id=current_id, name=str_header_val)
+        table.tableColumns.append(new_col)
+```
+
+`ws.tables.values()`の返り値に各`table`がすべて格納されているので、その中をループしています。
+
+`table.ref`という部分を更新したり、`table.tableColumns`を追加したり、ということをしています。
 
 # 下書きメモ
 
