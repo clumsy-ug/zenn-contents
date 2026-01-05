@@ -1070,7 +1070,7 @@ def expand_table_range(ws: Worksheet) -> None:
 
 `table.ref`という部分を更新したり、`table.tableColumns`を追加したり、ということをしています。
 
-## 10. グラフの範囲を1列拡張
+## 10. グラフ範囲拡張の準備
 
 ```python:function_app.py
 def main_process():
@@ -1085,41 +1085,42 @@ def main_process():
 
     # シート名(文字列)をキーとして、拡張前の列名と拡張後の列名が入ったタプルを格納する辞書を作成
     replacements = create_replacements_dict(book)
-
-    # 関数を呼んでストリームの中身を書き換える
-    logging.info("グラフ範囲のXML直接置換を実行中...")
-    output_stream = patch_xlsx_charts(output_stream, replacements)
-
-    # 新しいファイル名でアップロード(実行時の年月日を使用)
-    today_str = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y%m%d')
-    new_excel_blob_name = f'{EXCEL_FILE_NAME_PREFIX}{today_str}.xlsx'
-
-    logging.info('get_blob_client(new_excel_blob_name)開始...')
-    new_blob_client = container_client.get_blob_client(new_excel_blob_name)
-
-    # timeout: 処理全体のタイムアウト秒数
-    # max_concurrency: 並列アップロード数（デフォルトは1。増やすと速くなるが、不安定な回線では1か2が良い）
-    logging.info('upload_blob()開始...')
-    new_blob_client.upload_blob(output_stream, overwrite=True, timeout=600, max_concurrency=2)
-
-    logging.info(f'新規ファイルをアップロードしました: {new_excel_blob_name}')
-
-    # 古いファイルの名前に _old をつける(Azure Blobにはリネームのコマンドがないため、コピーして削除する)
-    old_renamed_blob_name = latest_excel_blob_name.replace('.xlsx', '_old.xlsx')
-
-    logging.info('get_blob_client(old_renamed_blob_name)開始...')
-    old_blob_client = container_client.get_blob_client(old_renamed_blob_name)
-
-    # 先月時点のblobのコピーとして _old というsuffixをつけたblobをコピーによりコンテナ上で作成
-    logging.info('start_copy_from_url()開始...')
-    old_blob_client.start_copy_from_url(blob_client.url)
-
-    # 元のファイルを削除
-    logging.info('delete_blob()開始...')
-    blob_client.delete_blob()
-
-    logging.info(f'古いファイルをリネームしました: {old_renamed_blob_name}')
 ```
+
+bookが完成したため、`output_stream`に保存しています。
+また、サマリが1列増えたことに伴ってグラフのデータ範囲も1列拡張したい訳ですが、その下準備として`create_replacements_dict`を実行しています。
+
+`create_replacements_dict`は以下です。
+
+```python:function_app.py
+def create_replacements_dict(book: Workbook) -> dict[str, tuple[str, str]]:
+    """replacements辞書を作成し返却"""
+
+    summary_sheet_names = [
+        '【サマリ】1(企業)', '【サマリ】1(社員)',
+        '【サマリ】2(企業)', '【サマリ】2(社員)',
+        '【サマリ】3(企業)', '【サマリ】3(社員)'
+    ]
+    replacements = {}
+
+    for summary_sheet_name in summary_sheet_names:
+        ws = book[summary_sheet_name]
+
+        current_max_col = ws.max_column     # 現在の最終列（拡張後の列）
+        prev_max_col = current_max_col - 1  # 拡張前の列（1つ左）
+        
+        old_letter = get_column_letter(prev_max_col)
+        new_letter = get_column_letter(current_max_col)
+        
+        replacements[summary_sheet_name] = (old_letter, new_letter)
+        logging.info(f"グラフのデータ範囲の最終列の置換ルール登録: {summary_sheet_name}シートの{old_letter}までを{new_letter}までに拡張")
+    
+    return replacements
+```
+
+これにより、どのシートの何列から何列まで拡張するか、という情報だけ事前に辞書として保存しています。
+
+## 11. ああ
 
 # 下書きメモ
 
