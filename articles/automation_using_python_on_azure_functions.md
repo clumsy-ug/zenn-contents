@@ -316,6 +316,11 @@ def main_process():
     ...
 ```
 
+今回1, 2, 3という数字がコード内に出てきますが、これはあるサービスのシステムを3種類に分けていることでサーバーやDBが異なっており、それが3種類あるという意味になります。（1と2はサーバーが違う、1と3はサーバーが同じだがDBが違う）
+
+実際はサービス名が入りますが、今回は便宜上1, 2, 3として分けています。
+
+
 ## 2. 実データを取得→DFに変換
 
 ```python:function_app.py
@@ -660,8 +665,8 @@ def main_process():
 - 先ほど作成したblob_clientを使って実際にblobの中身(データ)を取得し、それをdownload_streamに流し込む
 - `download_stream`の読み取り位置(カーソル)を先頭に戻す
   - これをやらないと`download_stream`の末尾つまりデータが無いところから読み込もうとしてしまいエラーになる
-- [openpyxl](https://pypi.org/project/openpyxl/)のload_workbook関数の引数にバイト列のdownload_streamを入れ実行することで、返り値として`openpyxl.Workbook`型の`book`を取得
-    - [こちら](https://note.nkmk.me/python-openpyxl-usage/)の説明にあるような`openpyxl.load_workbook('data/src/sample.xlsx')`という形で、`load_workbook`の引数にはExcelファイルの物理パスを入れても良いですが、ファイルライクなオブジェクト(`BytesIO`などのバイナリストリーム)も受け付けるように作られているので問題ありません
+- [openpyxl](https://pypi.org/project/openpyxl/)の`load_workbook`関数の引数にバイト列の`download_stream`を入れ実行することで、返り値として`openpyxl.Workbook`型の`book`を取得
+    - [こちら](https://note.nkmk.me/python-openpyxl-usage/)の説明にあるような`openpyxl.load_workbook('data/src/sample.xlsx')`という形で`load_workbook`の引数にはExcelファイルの物理パスを入れても良いですが、ファイルライクなオブジェクト(`BytesIO`などのバイナリストリーム)も受け付けるように作られているのでバイナリを入れても問題ないです
 - 最後に、最終出力用のバイナリストリームであるoutput_streamも初期化しておく
 
 blobをダウンロードしてそれをわざわざバイナリという中間表現に一旦落とし込んで、今度はそれをopenpyxlの`Workbook`という形に変換する、という手間をしています。
@@ -686,8 +691,165 @@ class BlobClient(StorageAccountHostsMixin, StorageEncryptionMixin):
 
 なので後からお目当てのblob(excel)ファイルを操作したい場合、`StorageStreamDownloader`として状態を保持していてもしょうがない(操作できない)ので、`openpyxl.Workbook`という状態(型)にしておきたい訳ですが、そのためには今回のケースだと一旦バイナリという状態を挟む必要があるので、まず`StorageStreamDownloader`をバイナリストリームにし、それを更に`Workbook`にしている、という流れになります。
 
-## 8. ああ
+## 8. 一覧表作成
 
+今回操作対象のExcelファイルのシート情報は以下になっています。
+
+- 一覧表6シート
+  - データを貼り付けただけ
+- サマリ6シート
+  - 一覧表を基に、列単位で`SUM`や`AVERAGE`を取る
+- グラフ6シート
+  - サマリを基に、月ごとの推移を折れ線グラフで描画
+- 計18シート
+
+このうちの一覧表の作成に入ります。
+実際には、既存のExcelファイルの一覧表シートのヘッダー以外の行を全て削除し、そこに新しい値(SQL実行結果)を張り付けます。
+
+```python:function_app.py
+from zoneinfo import ZoneInfo
+from openpyxl.utils.dataframe import dataframe_to_rows
+
+def main_process():
+
+    ...
+
+    # ---一覧表(6シート)の作成---
+    # 今の年月(新規作成するシート名に使用)
+    now_year_dot_month = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y.%m')
+    now = datetime.now(ZoneInfo('Asia/Tokyo'))
+
+    # 1か月前の年月(削除するシート名の判別に使用)
+    prev_date = pd.Timestamp(datetime.now(ZoneInfo('Asia/Tokyo'))) - pd.DateOffset(months=1)
+    prev_year_dot_month = prev_date.strftime('%Y.%m')
+
+    for basename, df in basename_df_list:
+        new_sheetname = f"【{now_year_dot_month}】{basename}"
+        old_sheetname = f"【{prev_year_dot_month}】{basename}"
+
+        ws = book[old_sheetname]
+
+        # シート名を変更(年月日を今月のものに変える)
+        ws.title = new_sheetname
+
+        # 既存のシートのデータ(ヘッダーである3行目までを除く。そこまではそのままで良い)を削除(4行目から、現在の最大行数分だけ削除)
+        ws.delete_rows(4, amount=ws.max_row)
+
+        # データの書き込み
+        for row in dataframe_to_rows(df, index=False, header=False):
+            ws.append(row)
+
+        match basename:
+            case '1(企業ごと)':
+                # A1セルの値の年月日を現在のものに変える
+                ws['A1'].value = f'1(企業ごと)利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                # 書式設定(左揃え、右揃え、桁区切り)の適用
+                logging.info(f'{basename}のapply_column_style()を実行中...')
+                apply_column_style(ws, ['企業コード', '企業名'])
+            case '1(社員ごと)':
+                ws['A1'].value = f'会クラVM1顧問先ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                logging.info(f'{basename}のapply_column_style()を実行中...')
+                apply_column_style(ws, ['企業コード', '企業名', '社員コード', '社員名'])
+            case '2(企業ごと)':
+                ws['A1'].value = f'2(企業)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                logging.info(f'{basename}のapply_column_style()を実行中...')
+                apply_column_style(ws, ['企業コード', '企業名'])
+            case '2(社員ごと)':
+                ws['A1'].value = f'2(社員)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                logging.info(f'{basename}のapply_column_style()を実行中...')
+                apply_column_style(ws, ['企業コード', '企業名', '社員コード', '社員名'])
+            case '3(企業ごと)':
+                # 2列しかなくスタイル適用処理が必要ない
+                ws['A1'].value = f'3(企業)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+            case '3(社員ごと)':
+                ws['A1'].value = f'3(社員)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                logging.info(f'{basename}のapply_column_style()を実行中...')
+                # 企業名は取得する必要なし（集計の都合上）
+                apply_column_style(ws, ['企業コード', '企業コード2', '社員コード', '社員名'])
+```
+
+以下のようなことをやっています。
+
+### 時刻関連の変数を作成
+- Azure(クラウド)上ではdatetime.nowはUTCとして実行されてしまうため、回避策としての`ZoneInfo`を使用
+- シート名判別に使用する`prev_year_dot_month`と、シート名作成(変更)に使用する`now_year_dot_month`を作成
+  - `prev_year_dot_month`を算出するための`prev_date`も作成
+    - `pandas.Timestamp`と`pandas.DateOffset`を使用して実現
+- 各一覧表シートのA1セルに使用するnowを作成
+- 
+
+### `basename_df_list`内をループ
+- basename_df_listは先ほどの [# 2. 実データを取得→DFに変換](https://zenn.dev/yg_kita/articles/automation_using_python_on_azure_functions#2.-%E5%AE%9F%E3%83%87%E3%83%BC%E3%82%BF%E3%82%92%E5%8F%96%E5%BE%97%E2%86%92df%E3%81%AB%E5%A4%89%E6%8F%9B) で作成したリスト
+- 各一覧表シートのシート名を変更
+  - 例: `【2025.11】1(企業ごと)` → `【2025.12】1(企業ごと)`
+  - Workbook[シート名]の形でシート(ワークシート / `ws`)が取得できます。
+    - 型は`_WorksheetOrChartsheetLike`というものですがほぼ`Worksheet`と同じだと思います
+- ヘッダーである3行目までを除き、それ以降の4行目から最後の行までを削除
+  - それによってヘッダーはスタイルなどもそのまま残すことができる
+  - ただ4行目以降の値に関してはセルのスタイルが失われるので、後述の`apply_column_style`関数でスタイルを適用する
+- dfを行単位でループし、ワークシートの4行目以降にその行データを追加(挿入)
+  - なぜちゃんと4行目から追加されるかというと、`openpyxl`の`Worksheet.append()`の挙動は「現在データが存在している最終行の次の行から追加する」という[仕様](https://openpyxl.readthedocs.io/en/3.1/api/openpyxl.worksheet.worksheet.html#openpyxl.worksheet.worksheet.Worksheet.append)だから
+    - > Appends a group of values at the bottom of the current sheet.
+- あとはシートごと(basenameごと)に、左揃えにしたいカラム名が違う、というようにスタイルの適用のさせ方が微妙に違うので分岐させています
+  - が、やっていることはほぼ同じで、A1セルを最新の日付で更新したあと`apply_column_style`を実行しています
+    - この関数について以下詳解します
+
+---
+`apply_column_style`の中身は以下です。
+
+```python:function_app.py
+def apply_column_style(
+    ws: Worksheet,
+    left_align_cols: list[str]
+) -> None:
+    """
+    【追加】指定されたシートのデータ行(4行目以降)に対して書式設定を行う。
+    3行目をヘッダーとして列名を判定する。
+    指定列は左揃え、それ以外は右揃え + 3桁カンマ区切りにする。
+    
+    Args:
+        ws: 対象のWorksheet
+        left_align_cols: 左揃えにする列名のリスト
+    """
+
+    # 列インデックスと列名のマッピングを作成 (1始まり)
+    left_col_indices = set()
+    right_col_indices = set()
+
+    # ヘッダー行のセルを読み込む
+    for cell in ws[3]:
+        # なぜか最初のシートだけNoneが4個認識されてしまうので弾く
+        if not cell.value:
+            break
+
+        col_name = str(cell.value)
+
+        # 指定された列名なら左揃えリストへ
+        if col_name in left_align_cols:
+            left_col_indices.add(cell.column)
+        else:
+            right_col_indices.add(cell.column)
+        
+    # 行ごとにスタイル適用(列で一気にやろうとしたらなぜか効かなかったため)
+    for row in ws.iter_rows(min_row=4, max_row=ws.max_row):
+        for cell in row:
+            if cell.column in left_col_indices:
+                cell.alignment = Alignment(horizontal='left')
+            elif cell.column in right_col_indices:
+                cell.alignment = Alignment(horizontal='right')
+                cell.number_format = '#,##0'
+```
+
+ヘッダの中でも左揃えにしたい列と右揃えにしたい列があります。
+その列名を第二引数に配列として渡しています。
+第一引数は変更を加えるワークシートそのものです。
+
+そしてそれらの列ごとに、行ループ->セルループ と二重ループし、セルごとに書式を整えています。
+右揃えにするセルは、3桁ごとにカンマを打つ数字として扱いたいので、その書式指定も行っています。
+
+列単位で一気に書式設定できれば楽かつ直感的ですが、なぜか効かなかったためこのやり方にしています。
+
+## 9. ああ
 
 # 下書きメモ
 
