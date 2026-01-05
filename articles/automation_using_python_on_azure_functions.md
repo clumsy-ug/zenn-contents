@@ -681,7 +681,8 @@ def main_process():
     - [こちら](https://note.nkmk.me/python-openpyxl-usage/)の説明にあるような`openpyxl.load_workbook('data/src/sample.xlsx')`という形で`load_workbook`の引数にはExcelファイルの物理パスを入れても良いですが、ファイルライクなオブジェクト(`BytesIO`などのバイナリストリーム)も受け付けるように作られているのでバイナリを入れても問題ないです
 - 最後に、最終出力用のバイナリストリームであるoutput_streamも初期化しておく
 
-blobをダウンロードしてそれをわざわざバイナリという中間表現に一旦落とし込んで、今度はそれをopenpyxlの`Workbook`という形に変換する、という手間をしています。
+blobをダウンロードしてそれをわざわざバイナリ(BytesIO)という中間表現に一旦落とし込んで、今度はそれをopenpyxlの`Workbook`という形に変換する、という手間をしています。
+まぁBLOBもBinary Large Objectの略なのでBinary、つまり同じじゃんという感じではあるんですが、`readinto()`を使用して`BytesIO`というpythonの型に明示的に変換しているので、AzureのblobとpythonのBytesIOという2つのバイナリはやはり厳密には違う構造だと言えそうです。
 
 一見、お目当てのblobを`download_blob`で取得して終わりに出来たら楽そうですが、残念ながらできません。
 
@@ -1085,6 +1086,8 @@ def main_process():
 
     # シート名(文字列)をキーとして、拡張前の列名と拡張後の列名が入ったタプルを格納する辞書を作成
     replacements = create_replacements_dict(book)
+
+    ...
 ```
 
 bookが完成したため、`output_stream`に保存しています。
@@ -1120,17 +1123,152 @@ def create_replacements_dict(book: Workbook) -> dict[str, tuple[str, str]]:
 
 これにより、どのシートの何列から何列まで拡張するか、という情報だけ事前に辞書として保存しています。
 
-## 11. ああ
+## 11. グラフ範囲拡張
+
+```python:function_app.py
+def main_process():
+
+    ...
+
+    # 関数を呼んでストリームの中身を書き換える
+    logging.info("グラフ範囲のXML直接置換を実行中...")
+    output_stream = patch_xlsx_charts(output_stream, replacements)
+
+    ...
+```
+
+`patch_xlsx_charts`実行により実際にグラフの範囲を1列分拡張しています。
+
+この関数が今回で一番複雑で面白いです。
+
+これまでと同様openpyxlで実現したかったのですがなぜかうまくいかなかったので、`.xlsx`の中身である`.xml`を直接操作することにしました。
+
+というかそもそもExcelの中身がxmlである(厳密には「`.xlsx`は`.zip`であり、`.zip`の中に複数`.xml`等がある」)ことを初めて知ったので、凄く勉強になりました。
+オフィス製品である`.xlsx`, `.docx`, `.pptx`の最後のxはxmlのxだったんですね。
+
+**OOXML**(Office Open XML)という規格で標準化されているようです。
+https://e-words.jp/w/Office_Open_XML.html
+
+で、excelがxmlであったことを知らないので当然、xmlを直接いじったこともなく、どういう構造/中身になっているのかもpythonからどう操作するのかも知らなかったのですが、それが理解できたのが良かったです。
+
+解説していきます。
+
+```python:function_app.py
+import zipfile
+
+def patch_xlsx_charts(
+    input_stream: io.BytesIO,
+    replacements: list[tuple[str, str]]
+) -> io.BytesIO:
+    """
+    保存した後のxlsxファイル(zip)のバイナリ(ストリーム)を受け取り、内部のチャートXMLを直接書き換えて
+    グラフのデータ範囲を拡張(1列分増やす)した新しいストリームを返す。
+    サマリのテーブル拡張のようにopenpyxlでやろうとしたがグラフを認識できなかったためこの方法で行う。
+    """
+    
+    # 読み取り位置を先頭に戻す
+    input_stream.seek(0)
+    
+    # 出力用の新しいストリーム
+    output_stream = io.BytesIO()
+    
+    # zipとして開き、ファイルをコピーしながら必要なら書き換え
+    # 型1. ZipFile: Zipファイル全体
+    # 型2. ZipInfo: ZipFileの中に入っている個々のファイルのメタ情報(filenameなど)
+    with zipfile.ZipFile(input_stream, 'r') as zin:
+        with zipfile.ZipFile(output_stream, 'w') as zout:
+            # itemはzipfileの中の各xml
+            for item in zin.infolist():
+                data = zin.read(item.filename)
+
+                # チャート定義ファイルの場合のみ置換処理を行う
+                if item.filename.startswith('xl/charts/chart') and item.filename.endswith('.xml'):
+                    # XMLはバイト列なので文字列にデコード
+                    xml_str = data.decode('utf-8')
+
+                    for summary_sheet_name in replacements:
+                        # 見つけた.xmlがどのサマリシートを参照しているのか、特定するまでループ
+                        # 特定したらそのサマリの拡張前・拡張後の列名のペアを取り出し、それを.xmlに適用(1列拡張)する
+                        if summary_sheet_name in xml_str:
+                            old_col, new_col = replacements[summary_sheet_name]
+                            # 正規表現: コロン(:) + $ + 旧列文字 + $ + 数字
+                            # 例: E列をF列にする場合、 :$E$5 -> :$F$5 に置換する
+                            # これにより範囲の「終了位置」だけが伸びる
+                            pattern = f"(:\\$){old_col}(\\$\\d+)"
+                            repl = f"\\g<1>{new_col}\\g<2>"
+                            
+                            # re.sub(正規表現, 正規表現にマッチした部分の置換後の文字列, 置換対象の文字列)
+                            xml_str = re.sub(pattern, repl, xml_str)
+                            break
+                    
+                    # 書き換えたデータをUTF-8バイト列に戻す
+                    data = xml_str.encode('utf-8')
+                
+                # 新しいzipに書き込み
+                zout.writestr(item, data)
+    
+    # ポインタを先頭に戻して返す
+    output_stream.seek(0)
+
+    return output_stream
+```
+
+まず入力と最終出力(returnするもの)は、どちらもお馴染みのバイナリストリーム(`input_stream` / `output_stream`)にしました。
+
+ただ、その中間表現として`zip`として扱う必要があります。
+
+xlsxの中身であるxmlをいじりたいので、xmlを含んでいるzipを認識する必要があり、zipとして読んでいます。
+
+先程はバイナリのままではなく`Workbook`にしないと操作ができないので`Workbook`にして、操作が終わったらバイナリに戻して、ということをしていましたがそういうことを今回もする必要があります。
+
+↓ 前者を後者にしないといけないというイメージです
+```
+AzureのBLOB -> Workbook
+```
+
+```
+AzureのBLOB -> Binary(BytesIO) -> Workbook
+```
+
+:::message
+めっちゃ余談ですが、こういう変換は面倒と言えば面倒ではあるもののデータ形式を変えるので当然のことだし、そもそも`zipfile.ZipFile(BytesIO)`とやるだけでバイナリをzipとして読み取れたり、`StorageStreamDownloader[bytes].readinto(BytesIO)`とやるだけでazure blobをBytesIOに流し込めたり、やはりでかいエコシステムには便利なメソッドが当然のように用意されてるのでそこまで面倒だと悲観するような話ではないかもしれないと自省しました、魔法に感謝。
+:::
+
+各xmlファイル(のメタ情報)をループで回り、パスが`xl/charts/chart`で始まり`.xml`で終わる場合はグラフを表すxmlなので、処理を行います。
+
+ちなみにそれを確認するには、適当な.xlsxファイルの拡張子を`.zip`にrenameしてその中を覗いてみるとわかります。
+
+グラフが`xl/charts/chart1.xml`, `chart2.xml`, `chart3.xml` ...という名前で格納される構造になっていることが確認できます。
+
+グラフの範囲を拡張するためにxmlの中身を文字列(str)として取り出したいです。
+そこでややこしいのですが、わざわざバイナリをzipにしたにも関わらず`zin.read(filename)`をしてまたバイナリに戻し、それを`bytes.decode('utf-8')`とやることでutf-8として文字列にデコードしています。
+
+それが`xml_str`変数です。
+
+で、先ほど下準備で作成した`replacements`を使います。
+
+replacementsの該当シートをキーとして保存してある「古い列(`E`など)」と「拡張後の新しい列(`F`など)」を`old_col`, `new_col`として取得します。
+
+そして、例えばEをFまで拡張したい場合は`:$E$5`という文字列を`:$F$5`という文字列に置換すれば良いことになるので、これを正規表現のグルーピングで実現しています。
+
+（正規表現のグルーピングはpythonの`re`モジュールの標準機能です）
+https://docs.python.org/ja/3.13/howto/regex.html#grouping
+
+置換が完了したxml文字列を`str.encode('utf-8')`でバイナリに戻して、それを`ZipFile.writestr(ZipInfo, binary)`でZipFileに書き込むことで、それと同期されている最終出力の`output_stream`も変更することができます。
+
+ループが終わったらカーソルを先頭に戻してからその`output_stream`を返却して終了です。
+
+---
+ちなみに、実は最初matplotlibで0から図を作ろうとしていましたが、既存のexcelの図を操作できたらそれで良いじゃないかということに気づいてそうしました。
+スタイルなどがすべて引き継げるのが良いですね。
+
+## 12. ああ
 
 # 下書きメモ
 
 - flex consumptionだとremote buildという便利な機能があり、手元でpythonをビルドする必要がなく、またrequirements.txtさえ用意しておけばリモートでそれを自動でインストールしてくれるっぽく、凄く楽にデプロイ成功して良かった。
 
-- 最初matplotlibで図を作ろうとしていたが、既存のexcelの図をopenpyxlで取得していじるところまでやっちゃえば良いことに気づいて楽にグラフを拡張できてよかった。スタイル引き継げるのが良い
-
-- 最初はローカルでこういう風に実行して試してた。毎回sql走って実行を5~10分待つのが面倒だったが、本番に近い状態で正常に実行されるか常に確認しておきたかったので我慢した
-
-- 余談だがexcelなどのmsアプリのファイルは内部でxmlになっていること、だからこそ .xlsx / .docx / .pptx のxはxmlのxとして使われていること、を知った。で、グラフのタイトルが消えてしまうときとかにxmlの中身を見に行ってxmlが存在しないからxmlとは違って内部キャッシュを恐らくexcelはもっていてそこが消えてしまったんだろうとかそういうアタリをつけられて、楽しかった。実際に1文字消す、戻す、とやってxmlにそれが認識されていることを確認し、再度実行したらちゃんと直ったので、良かった。
+- グラフのタイトルが消えてしまうときとかにxmlの中身を見に行ってxmlが存在しないからxmlとは違って内部キャッシュを恐らくexcelはもっていてそこが消えてしまったんだろうとかそういうアタリをつけられて、楽しかった。実際に1文字消す、戻す、とやってxmlにそれが認識されていることを確認し、再度実行したらちゃんと直ったので、良かった、これやらないといけないケースにはまってたので。
  
  - 集計表がおかしいとか、ある時点での集計表をもう一度見たいとか、集計表を見る営業サイドだけでなく開発サイド(主に私)も過去の集計表が見たいということで、月ごとの集計表はファイル名の末尾に`_old`をつけて一応スナップショットとして保存しておくことにしている
 
