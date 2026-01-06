@@ -1003,7 +1003,7 @@ def add_new_column_to_summarysheet_about_number_of_employee(
         set_value_and_copy_style(summary_sheet, 5, target_col_number, total_number_of_assigned_tasks)
 
         if '3' in summary_sheetname:
-            xxx = target_df['xxx'].sum()
+            xxx = target_df_office['xxx'].sum()
             # ...
         else:
             yyy = target_df_user['yyy'].sum()
