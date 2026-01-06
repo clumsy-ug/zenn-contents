@@ -96,7 +96,6 @@ FROM [Employee-Table];
 
 # プログラムの解説
 
-
 ## Pythonファイル
 Pythonファイルの完成版はこちらです。
 
@@ -1151,7 +1150,7 @@ https://e-words.jp/w/Office_Open_XML.html
 
 で、excelがxmlであったことを知らないので当然、xmlを直接いじったこともなく、どういう構造/中身になっているのかもpythonからどう操作するのかも知らなかったのですが、それが理解できたのが良かったです。
 
-解説していきます。
+ということで解説していきます。
 
 ```python:function_app.py
 import zipfile
@@ -1231,7 +1230,7 @@ AzureのBLOB -> Binary(BytesIO) -> Workbook
 ```
 
 :::message
-めっちゃ余談ですが、こういう変換は面倒と言えば面倒ではあるもののデータ形式を変えるので当然のことだし、そもそも`zipfile.ZipFile(BytesIO)`とやるだけでバイナリをzipとして読み取れたり、`StorageStreamDownloader[bytes].readinto(BytesIO)`とやるだけでazure blobをBytesIOに流し込めたり、やはりでかいエコシステムには便利なメソッドが当然のように用意されてるのでそこまで面倒だと悲観するような話ではないかもしれないと自省しました、魔法に感謝。
+余談ですが、こういう変換は面倒と言えば面倒ではあるもののデータ形式を変えるので当然のことだし、そもそも`zipfile.ZipFile(BytesIO)`とやるだけでバイナリをzipとして読み取れたり、`StorageStreamDownloader[bytes].readinto(BytesIO)`とやるだけでazure blobをBytesIOに流し込めたり、やはりでかいエコシステムには便利なメソッドが当然のように用意されてるのでそこまで面倒だと悲観するような話ではないかもしれないと自省しました、魔法に感謝。
 :::
 
 各xmlファイル(のメタ情報)をループで回り、パスが`xl/charts/chart`で始まり`.xml`で終わる場合はグラフを表すxmlなので、処理を行います。
@@ -1259,17 +1258,69 @@ https://docs.python.org/ja/3.13/howto/regex.html#grouping
 ループが終わったらカーソルを先頭に戻してからその`output_stream`を返却して終了です。
 
 ---
-ちなみに、実は最初matplotlibで0から図を作ろうとしていましたが、既存のexcelの図を操作できたらそれで良いじゃないかということに気づいてそうしました。
-スタイルなどがすべて引き継げるのが良いですね。
+ちなみに、実は最初matplotlibで0から図を作ろうとしていましたが、途中から既存のexcelの図を操作できたらそっちの方が良いということに気づきました。
+スタイルなどがすべて引き継げるのが良いです。
 
-## 12. ああ
+また、グラフのタイトルが消えてしまうときとかにxmlの中身を見に行ってxmlが存在しないからxmlとは違って内部キャッシュを恐らくexcelはもっていてそこが消えてしまったんだろうとかそういうアタリをつけられて、楽しかった。実際に1文字消す、戻す、とやってxmlにそれが認識されていることを確認し、再度実行したらちゃんと直ったので、良かった、これやらないといけないケースにはまってたので。
 
-# 下書きメモ
+## 12. アップロードとリネーム
 
-- flex consumptionだとremote buildという便利な機能があり、手元でpythonをビルドする必要がなく、またrequirements.txtさえ用意しておけばリモートでそれを自動でインストールしてくれるっぽく、凄く楽にデプロイ成功して良かった。
+これでラストです。
 
-- グラフのタイトルが消えてしまうときとかにxmlの中身を見に行ってxmlが存在しないからxmlとは違って内部キャッシュを恐らくexcelはもっていてそこが消えてしまったんだろうとかそういうアタリをつけられて、楽しかった。実際に1文字消す、戻す、とやってxmlにそれが認識されていることを確認し、再度実行したらちゃんと直ったので、良かった、これやらないといけないケースにはまってたので。
+```python:function_app.py
+def main_process():
+
+    ...
+
+    # 新しいファイル名でアップロード(実行時の年月日を使用)
+    today_str = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y%m%d')
+    new_excel_blob_name = f'{EXCEL_FILE_NAME_PREFIX}{today_str}.xlsx'
+
+    logging.info('get_blob_client(new_excel_blob_name)開始...')
+    new_blob_client = container_client.get_blob_client(new_excel_blob_name)
+
+    # timeout: 処理全体のタイムアウト秒数
+    # max_concurrency: 並列アップロード数（デフォルトは1。増やすと速くなるが、不安定な回線では1か2が良い）
+    logging.info('upload_blob()開始...')
+    new_blob_client.upload_blob(output_stream, overwrite=True, timeout=600, max_concurrency=2)
+
+    logging.info(f'新規ファイルをアップロードしました: {new_excel_blob_name}')
+
+    # 古いファイルの名前に _old をつける(Azure Blobにはリネームのコマンドがないため、コピーして削除する)
+    old_renamed_blob_name = latest_excel_blob_name.replace('.xlsx', '_old.xlsx')
+
+    logging.info('get_blob_client(old_renamed_blob_name)開始...')
+    old_blob_client = container_client.get_blob_client(old_renamed_blob_name)
+
+    # 先月時点のblobのコピーとして _old というsuffixをつけたblobをコピーによりコンテナ上で作成
+    logging.info('start_copy_from_url()開始...')
+    old_blob_client.start_copy_from_url(blob_client.url)
+
+    # 元のファイルを削除
+    logging.info('delete_blob()開始...')
+    blob_client.delete_blob()
+
+    logging.info(f'古いファイルをリネームしました: {old_renamed_blob_name}')
+```
+
+要は、完成したバイナリストリームをblobとしてuploadし、古いファイルは`_old`付きのファイル名にrename(厳密にはコピー&削除)しているだけです。
+
+詳細としては以下の流れで処理をしています。
+
+- 集計月の新しい日付をつけたexcelファイル名を`new_excel_blob_name`として作成
+- そのファイル名のファイルの接続操作用のクライアントを`new_blob_client`として作成
+- 完成している`output_stream`をクライアントから先ほどのファイル名のblobとしてアップロードする
+- 「集計表がおかしい」「〇月時点の集計表をもう一度見たい」などの要望に対応するために、過去の集計表はファイル名の末尾に`_old`をつけて一応スナップショットとして保存しておくことにしている
+  - しかし前月時点のファイルの末尾に`_old`というsuffixをつけたいがazure上で直接renameする機能がない
+  - そのためファイル名に`_old`をつけたファイルとして前月時点のファイルを中身だけコピーし、そのあと前月時点のファイルを削除することで実質renameを実現
+
+# デプロイ
+
+作成したPythonをAzure Functionsで自動定期実行させるために、デプロイをします。
+
+
+flex consumptionだとremote buildという便利な機能があり、手元でpythonをビルドする必要がなく、またrequirements.txtさえ用意しておけばリモートでそれを自動でインストールしてくれるっぽく、凄く楽にデプロイ成功して良かったです。
+
+# メモ
  
- - 集計表がおかしいとか、ある時点での集計表をもう一度見たいとか、集計表を見る営業サイドだけでなく開発サイド(主に私)も過去の集計表が見たいということで、月ごとの集計表はファイル名の末尾に`_old`をつけて一応スナップショットとして保存しておくことにしている
-
 - importするやつ全部できてるか確認
