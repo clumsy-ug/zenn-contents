@@ -29,7 +29,7 @@ https://github.com/clumsy-ug/excel-operations-and-azurefunc-sample/tree/main
 具体的には以下の流れで行っていました。
 
 1. 社内のGitLabプロジェクト(リポジトリ)から、実行したいSQLファイル(複数)をコピー
-    - SQLを複数ファイルに分けている理由は、それらのSQLの中でも接続先したいサーバが異なっているものがあるため、それぞれコネクションを別にしてAzure SQL Databaseと接続する必要があり、それらを分かりやすく分離するため
+    - SQLを複数ファイルに分けている理由は、それらのSQLの中でも接続したいサーバが異なっているものがあるため、それぞれコネクションを別にしてAzure SQL Databaseと接続する必要があり、それらを分かりやすく分離するため
     - 本記事と同じAzure SQL DatabaseではなくSQL Server(オンプレ)を使用する場合は、今回使用した`pandas.read_sql()`メソッドのエラー回避[^1]のためにも分離する必要はありそう
 
 2. [SSMS](https://learn.microsoft.com/ja-jp/ssms/install/install)(SQL Server Management Studio)に貼り付け、接続先であるAzure SQL Databaseに対して実行
