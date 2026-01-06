@@ -913,7 +913,7 @@ def main_process():
     )
 
     logging.info('「【サマリ】3(企業)」に1列追加中...')
-    add_new_column_to_summarysheet_about_number_of_employee(
+    add_new_column_to_summarysheet_about_number_of_company(
         basename_df_list[5][1],
         book,
         '【サマリ】3(企業)'
@@ -966,6 +966,13 @@ def add_new_column_to_summarysheet_about_number_of_company(
         total_number_of_employees = target_df['社員数'].sum()
         set_value_and_copy_style(summary_sheet, 5, target_col_number, total_number_of_employees)
 
+        if '3' in summary_sheetname:
+            xxx = target_df['xxx'].sum()
+            # ...
+        else:
+            yyy = target_df['yyy'].sum()
+            # ...
+
         # ...
 
         # サマリシートの各テーブル範囲を1列増やす
@@ -995,8 +1002,12 @@ def add_new_column_to_summarysheet_about_number_of_employee(
         total_number_of_assigned_tasks = target_df_office['担当業務数'].mean()
         set_value_and_copy_style(summary_sheet, 5, target_col_number, total_number_of_assigned_tasks)
 
-        total_number_of_xxx =   target_df_user['xxx'].sum()
-        set_value_and_copy_style(summary_sheet, 12, target_col_number, total_number_of_xxx)
+        if '3' in summary_sheetname:
+            xxx = target_df['xxx'].sum()
+            # ...
+        else:
+            yyy = target_df_user['yyy'].sum()
+            # ...
 
         # ...
 
@@ -1151,7 +1162,7 @@ def main_process():
 
 `patch_xlsx_charts`実行により実際にグラフの範囲を1列分拡張しています。
 
-この関数が今回で一番複雑で面白いです。
+この関数が今回で一番複雑で面白いです。（多分ダーティハックですが）
 
 これまでと同様openpyxlで実現したかったのですがなぜかうまくいかなかったので、`.xlsx`の中身である`.xml`を直接操作することにしました。
 
@@ -1272,10 +1283,10 @@ https://docs.python.org/ja/3.13/howto/regex.html#grouping
 ループが終わったらカーソルを先頭に戻してからその`output_stream`を返却して終了です。
 
 ---
-ちなみに、実は最初matplotlibで0から図を作ろうとしていましたが、途中から既存のexcelの図を操作できたらそっちの方が良いということに気づきました。
-スタイルなどがすべて引き継げるのが良いです。
+ちなみに、実は最初matplotlibで0から図を作ろうとしていましたが、途中から既存のexcelの図を操作できたらそっちの方が良いということに気づきました。スタイルなどがすべて引き継げるのが良いです。
 
-また、グラフのタイトルが消えてしまうときとかにxmlの中身を見に行ってxmlが存在しないからxmlとは違って内部キャッシュを恐らくexcelはもっていてそこが消えてしまったんだろうとかそういうアタリをつけられて、楽しかった。実際に1文字消す、戻す、とやってxmlにそれが認識されていることを確認し、再度実行したらちゃんと直ったので、良かった、これやらないといけないケースにはまってたので。
+また、グラフのタイトルがExcelファイルの見た目上は見えているのに、xmlの中身を見てみるとタイトルが存在しないことになっているという事象がありました。
+ここから考えられることは、Excelファイルはxmlと見た目が完全に一致している訳ではなく、一時キャッシュのようなものを恐らく持っており、それが見た目に寄与することがあるということです。
 
 ## 12. アップロードとリネーム
 
@@ -1327,6 +1338,46 @@ def main_process():
 - 「集計表がおかしい」「〇月時点の集計表をもう一度見たい」などの要望に対応するために、過去の集計表はファイル名の末尾に`_old`をつけて一応スナップショットとして保存しておくことにしている
   - しかし前月時点のファイルの末尾に`_old`というsuffixをつけたいがazure上で直接renameする機能がない
   - そのためファイル名に`_old`をつけたファイルとして前月時点のファイルを中身だけコピーし、そのあと前月時点のファイルを削除することで実質renameを実現
+
+:::message alert
+なお`start_copy_from_url`関数についてなのですが、この関数は非同期処理で実際にコピーする前にAzureのキューにコピー命令を入れるだけでそれが終わるとすぐ次の行に行ってしまう可能性があり、そうなると先にdeleteが行われてcopyしようとしたらcopy元のファイルが見つからないということになる可能性もあるか...？とふと思いました。今のところエラーにはならず正常に実行できているので変更の予定はないですが、もし変えるなら以下のようにするのが良いかもしれません。（動作は未検証です）
+:::
+
+:::details copyが終了してからdeleteする安全な実装
+```python
+import time
+ 
+# 1. コピー命令を出す（非同期で開始される）
+logging.info('start_copy_from_url()開始...')
+old_blob_client.start_copy_from_url(blob_client.url)
+ 
+# 2. コピーが完了するまで監視する（ポーリング処理）
+start_time = time.time()
+while True:
+    # 宛先（新しいファイル）のプロパティを取得してステータスを確認
+    props = old_blob_client.get_blob_properties()
+    copy_status = props.copy.status
+    if copy_status == 'success':
+        # コピー成功のためループを抜ける
+        logging.info('コピー完了を確認しました。')
+        break
+    elif copy_status == 'pending':
+        # 処理中のため少し待ってから再確認
+        logging.info(f'コピー処理中... (status: {copy_status})')
+        time.sleep(2)  # 2秒待機
+    else:
+        # 失敗 (failed, aborted など)
+        raise Exception(f"コピーに失敗しました。Status: {copy_status}")
+ 
+    # 無限ループ防止のタイムアウト設定
+    if time.time() - start_time > 60:  # 60秒以上かかったらエラーにする
+        raise TimeoutError("コピー処理がタイムアウトしました。")
+ 
+# 3. 確実にコピーが終わったことを確認してから、元のファイルを削除
+logging.info('delete_blob()開始...')
+blob_client.delete_blob()
+```
+:::
 
 # デプロイ
 
@@ -1399,7 +1450,7 @@ python以外の各ファイルの中身は最小限の構成ということで�
 }
 ```
 
-```txt:reauirements.txt
+```txt:requirements.txt
 requests==2.32.5
 pyodbc==5.3.0
 pandas==2.3.3
@@ -1418,7 +1469,7 @@ azure-functions==1.24.0
 az functionapp deployment source config-zip --src <zipファイル名> --name <Azure Functionsアプリ名> --resource-group <リソースグループ名> --build-remote true
 ```
 
-コマンドにもあるように、flex consumptionプランだと**remote build**という便利な機能があるため手元でpythonをビルドする必要がなく、またrequirements.txtさえ用意しておけばリモートでそれを自動でインストールしてくれるため楽にデプロイができて良かったです。
+コマンドにもあるように、flex consumptionプランだと**remote build**という便利な機能があるため手元でpythonをビルドする必要がなく、またrequirements.txtさえ用意しておけばリモートでそれらの依存ライブラリを自動でインストールしてくれるため楽にデプロイができて良かったです。
 
 これで以下のようにログが出たら成功です。
 
