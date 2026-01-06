@@ -1,5 +1,5 @@
 ---
-title: "（執筆中）Azure Functions + Python(openpyxl)で毎月のExcel集計を自動化した"
+title: "Azure Functions + Python(openpyxl)で毎月のExcel集計を自動化した"
 emoji: "📊"
 type: "tech"
 topics: ["azurefunctions", "python", "openpyxl", "excel"]
@@ -117,6 +117,11 @@ def main_process():
 公式の例に則り、以下のように書くことで定期実行されるようにします。
 
 ```python:function_app.py
+import azure.functions as func
+
+# アプリケーションの初期化
+app = func.FunctionApp()
+
 # schedule: "秒 分 時 日 月 曜日"
 # Asia/Tokyoで毎月20日の4:00に実行したい -> UTCだと9時間前なので19日の19:00になる
 @app.schedule(
@@ -145,7 +150,7 @@ def monthly_processing(myTimer: func.TimerRequest) -> None:
 https://www.jisakeisan.com/?t1=utc&t2=jst
 
 また、後述しますがPythonファイル内でも`datetime.now()`を使っている箇所があり、これだとUTC時間で認識されてしまうので、好きなタイムゾーンを指定できる[ZoneInfo](https://docs.python.org/ja/3/library/zoneinfo.html)というPythonライブラリを`datetime.now()`の引数で使用することで正確に`Asia/Tokyo`のタイムゾーンで認識できるようにしました。
-
+f
 ちなみにローカルで動かしたいときは以下のように書いて実行します。
 
 ```python:function_app.py
@@ -337,6 +342,7 @@ def main_process():
 ```python:function_app.py
 import requests
 import pandas as pd
+import pyodbc
 import logging
 
 def download_sql_text(sql_url: str) -> list[str]:
@@ -810,6 +816,9 @@ def main_process():
 `apply_column_style`の中身は以下です。
 
 ```python:function_app.py
+from openpyxl.worksheet.worksheet import Worksheet
+from openpyxl.styles import Alignment
+
 def apply_column_style(
     ws: Worksheet,
     left_align_cols: list[str]
@@ -924,6 +933,7 @@ def main_process():
 それぞれの関数の実装は以下です。
 
 ```python:function_app.py
+from datetime import datetime
 from openpyxl.utils import get_column_letter
 
 date_of_execution = datetime.now(ZoneInfo('Asia/Tokyo')).strftime('%Y/%m/%d')
@@ -1033,6 +1043,7 @@ def set_value_and_copy_style(
 
 ```python:function_app.py
 from openpyxl.utils.cell import range_boundaries
+from openpyxl.worksheet.table import TableColumn
 
 def expand_table_range(ws: Worksheet) -> None:
     """
@@ -1154,6 +1165,7 @@ https://e-words.jp/w/Office_Open_XML.html
 
 ```python:function_app.py
 import zipfile
+import re
 
 def patch_xlsx_charts(
     input_stream: io.BytesIO,
@@ -1318,9 +1330,109 @@ def main_process():
 
 作成したPythonをAzure Functionsで自動定期実行させるために、デプロイをします。
 
+なお、今回はAzure Functionsのflex consumptionプラン(flex 従量課金プラン)を使用します。
 
-flex consumptionだとremote buildという便利な機能があり、手元でpythonをビルドする必要がなく、またrequirements.txtさえ用意しておけばリモートでそれを自動でインストールしてくれるっぽく、凄く楽にデプロイ成功して良かったです。
+## 1. ログイン
 
-# メモ
- 
-- importするやつ全部できてるか確認
+```bash
+az login --tenant xxxxx
+```
+
+テナントIDを指定してログインします。
+2回目以降は`az login`だけでもいけました。
+
+`az login`だけ実行するとテナント選択画面が出てくるのでそこから選択してもできることがありますが、それができずエラーになることもあったので、最初はテナントIDまで指定するのが確実だと思います。
+
+テナントIDは、Azure Portalに入ってMicrosoft Entra IDと入力して出てきたものを選択すれば確認できます。
+
+## 2. Zipファイル作成
+
+今回作成したpythonの1ファイルだけではなく、計4ファイル作成し、それらを.zipに圧縮してそのzipをデプロイする必要があります。
+
+1. function_app.py
+   1. 作成したpythonファイル。このファイル名にしてください
+2. host.json
+3. local.settings.json
+4. requirements.txt
+
+https://learn.microsoft.com/ja-jp/azure/azure-functions/functions-reference-python?tabs=get-started%2Casgi%2Capplication-level&pivots=python-mode-decorators#folder-structure
+
+python以外の各ファイルの中身は最小限の構成ということで、以下にします。
+
+```json:host.json
+{
+  "version": "2.0",
+  "logging": {
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      }
+    }
+  },
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  }
+}
+```
+
+```json:local.settings.json
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "<language worker>",
+    "AzureWebJobsStorage": "<connection-string>",
+    "MyBindingConnection": "<binding-connection-string>",
+    "AzureWebJobs.HttpExample.Disabled": "true"
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "*",
+    "CORSCredentials": false
+  },
+  "ConnectionStrings": {
+    "SQLConnectionString": "<sqlclient-connection-string>"
+  }
+}
+```
+
+```txt:reauirements.txt
+requests==2.32.5
+pyodbc==5.3.0
+pandas==2.3.3
+azure-storage-blob==12.27.1
+openpyxl==3.1.5
+azure-functions==1.24.0
+```
+
+そしてそれら4ファイルをエクスプローラーで同時選択し、右クリックからZipファイルに圧縮します。
+
+こうしてできた1つのZipファイルをデプロイすることになります。
+
+## 3. Zipファイルデプロイ
+
+```bash
+az functionapp deployment source config-zip --src <zipファイル名> --name <Azure Functionsアプリ名> --resource-group <リソースグループ名> --build-remote true
+```
+
+コマンドにもあるように、flex consumptionプランだと**remote build**という便利な機能があるため手元でpythonをビルドする必要がなく、またrequirements.txtさえ用意しておけばリモートでそれを自動でインストールしてくれるため楽にデプロイができて良かったです。
+
+これで以下のようにログが出たら成功です。
+
+```log
+Getting scm site credentials for zip deployment
+Starting zip deployment. This operation can take a while to complete ...
+Deployment endpoint responded with status code 202 for deployment id "xxxxx"
+Waiting for sync triggers...
+Checking the health of the function app
+"Deployment was successful."
+```
+
+正常にデプロイできていればAzure Functionsのページの「名前」欄に新しくアプリが追加されているはずです。
+![](https://storage.googleapis.com/zenn-user-upload/190fe7c3a3eb-20260106.png)
+
+あとはコードが正しければpython内のTimer Trigger(v2)記法で指定した時間に定期実行されます。
+
+またAzure Functions該当アプリのページから「テスト/実行」タブを開き、「実行」を押すと手動でも実行できます。
+![](https://storage.googleapis.com/zenn-user-upload/eb3decb9711e-20260106.png)
