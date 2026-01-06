@@ -10,13 +10,13 @@ published: true
 
 業務で月に1度ユーザの利用集計をExcelにまとめており、その作業に約3時間かかっていたのを0にしました。
 
-Pythonファイルに3時間分の苦悩(後述)を900行程で詰め込み、それをAzure FunctionsのTimer Trigger機能で自動的に月一実行し、出力結果であるExcelファイルをAzure Blob Storageの指定したコンテナに格納します。
+Pythonファイルに3時間分の作業内容(後述)を800行弱で詰め込み、それをAzure FunctionsのTimer Trigger機能で自動的に月一実行し、出力結果であるExcelファイルをAzure Blob Storageの指定したコンテナに格納します。
 
 今後は月に1度そのコンテナを見に行って、作成されているExcel(実体はBLOB)ファイルをダウンロードするだけで集計表が手に入る状態になりました。やったね。
 
 GitHubにPythonファイルやrequirements.txtなどをまとめたリポジトリを上げています。
 
-リンク張る
+https://github.com/clumsy-ug/excel-operations-and-azurefunc-sample/tree/main
 
 # 背景
 
@@ -99,7 +99,7 @@ FROM [Employee-Table];
 ## Pythonファイル
 Pythonファイルの完成版はこちらです。
 
-リンク張る。
+https://github.com/clumsy-ug/excel-operations-and-azurefunc-sample/blob/main/function_app.py
 
 ## メイン関数とTimer Trigger
 
@@ -765,22 +765,22 @@ def main_process():
                 logging.info(f'{basename}のapply_column_style()を実行中...')
                 apply_column_style(ws, ['企業コード', '企業名'])
             case '1(社員ごと)':
-                ws['A1'].value = f'会クラVM1顧問先ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                ws['A1'].value = f'1(社員ごと)利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
                 logging.info(f'{basename}のapply_column_style()を実行中...')
                 apply_column_style(ws, ['企業コード', '企業名', '社員コード', '社員名'])
             case '2(企業ごと)':
-                ws['A1'].value = f'2(企業)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                ws['A1'].value = f'2(企業ごと)利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
                 logging.info(f'{basename}のapply_column_style()を実行中...')
                 apply_column_style(ws, ['企業コード', '企業名'])
             case '2(社員ごと)':
-                ws['A1'].value = f'2(社員)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                ws['A1'].value = f'2(社員ごと)利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
                 logging.info(f'{basename}のapply_column_style()を実行中...')
                 apply_column_style(ws, ['企業コード', '企業名', '社員コード', '社員名'])
             case '3(企業ごと)':
                 # 2列しかなくスタイル適用処理が必要ない
-                ws['A1'].value = f'3(企業)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                ws['A1'].value = f'3(企業ごと)利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
             case '3(社員ごと)':
-                ws['A1'].value = f'3(社員)ごと利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
+                ws['A1'].value = f'3(社員ごと)利用集計({now.year}年{now.month}月{now.day}日時点累計数)'
                 logging.info(f'{basename}のapply_column_style()を実行中...')
                 # 企業名は取得する必要なし（集計の都合上）
                 apply_column_style(ws, ['企業コード', '企業コード2', '社員コード', '社員名'])
