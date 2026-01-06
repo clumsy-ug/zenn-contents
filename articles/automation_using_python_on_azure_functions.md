@@ -101,6 +101,8 @@ Pythonファイルの完成版はこちらです。
 
 https://github.com/clumsy-ug/excel-operations-and-azurefunc-sample/blob/main/function_app.py
 
+サンプルとして抽象化しているため実際の値や機密情報に関わる部分はマスクしています。
+
 ## メイン関数とTimer Trigger
 
 Azure Functions上で実行するのはmain_process関数としています。
@@ -1341,7 +1343,7 @@ az login --tenant xxxxx
 テナントIDを指定してログインします。
 2回目以降は`az login`だけでもいけました。
 
-`az login`だけ実行するとテナント選択画面が出てくるのでそこから選択してもできることがありますが、それができずエラーになることもあったので、最初はテナントIDまで指定するのが確実だと思います。
+`az login`だけ実行するとテナント選択画面が出てくるのでそこから選択してもできることがありますが、それができず権限エラーのようになることもあったので、最初はテナントIDまで指定するのが確実だと思います。
 
 テナントIDは、Azure Portalに入ってMicrosoft Entra IDと入力して出てきたものを選択すれば確認できます。
 
