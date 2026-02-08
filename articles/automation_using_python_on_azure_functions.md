@@ -152,7 +152,7 @@ def monthly_processing(myTimer: func.TimerRequest) -> None:
 https://www.jisakeisan.com/?t1=utc&t2=jst
 
 また、後述しますがPythonファイル内でも`datetime.now()`を使っている箇所があり、これだとUTC時間で認識されてしまうので、好きなタイムゾーンを指定できる[ZoneInfo](https://docs.python.org/ja/3/library/zoneinfo.html)というPythonライブラリを`datetime.now()`の引数で使用することで正確に`Asia/Tokyo`のタイムゾーンで認識できるようにしました。
-f
+
 ちなみにローカルで動かしたいときは以下のように書いて実行します。
 
 ```python:function_app.py
@@ -803,7 +803,6 @@ def main_process():
   - `prev_year_dot_month`を算出するための`prev_date`も作成
     - `pandas.Timestamp`と`pandas.DateOffset`を使用して実現
 - 各一覧表シートのA1セルに使用するnowを作成
-- 
 
 ### `basename_df_list`内をループ
 - basename_df_listは先ほどの [# 2. 実データを取得→DFに変換](https://zenn.dev/yg_kita/articles/automation_using_python_on_azure_functions#2.-%E5%AE%9F%E3%83%87%E3%83%BC%E3%82%BF%E3%82%92%E5%8F%96%E5%BE%97%E2%86%92df%E3%81%AB%E5%A4%89%E6%8F%9B) で作成したリスト
@@ -1496,3 +1495,10 @@ Checking the health of the function app
 
 またAzure Functions該当アプリのページから「テスト/実行」タブを開き、「実行」を押すと手動でも実行できます。
 ![](https://storage.googleapis.com/zenn-user-upload/eb3decb9711e-20260106.png)
+
+# 追記
+
+- 実際に1か月後の初自動集計時、成功していることを確認しました
+  - 中身も確認し、理想通りのデータが追加・作成されていました
+
+![](https://storage.googleapis.com/zenn-user-upload/34e3a28ff116-20260208.png)
