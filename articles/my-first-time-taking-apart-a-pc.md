@@ -2,7 +2,7 @@
 title: "初めてPCを分解した"
 emoji: "🙌"
 type: "tech"
-topics: ["hardware", "ハードウェア", "分解", "メモリ", "メモリ増設"]
+topics: ["PC", "ハードウェア", "メモリ", "分解"]
 published: true
 ---
 
