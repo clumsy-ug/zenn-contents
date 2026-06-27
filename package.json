@@ -10,6 +10,6 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "zenn-cli": "^0.1.162"
+    "zenn-cli": "^0.5.2"
   }
 }
