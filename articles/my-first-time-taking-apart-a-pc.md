@@ -125,7 +125,9 @@ https://www.dell.com/support/contents/ja-jp/article/product-support/self-support
 
 :::
 
-ということで、"DIMM2 DDR4 Only"とシルク印刷で書かれてある空きスロットにメモリを挿してメモリ増設をしていく。
+---
+
+とりあえず、"DIMM2 DDR4 Only"とシルク印刷で書かれてある空きスロットにメモリを挿してメモリ増設をしていく。
 
 （後から気づいたが、Dell公式がメモリの取り外し方を説明しているサイトがあった）
 
