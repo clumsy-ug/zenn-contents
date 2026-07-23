@@ -14,8 +14,7 @@ published: true
 
 今回分解したPCはDellのLatitude 3440。
 
-https://www.dell.com/support/manuals/ja-jp/latitude-14-3440-laptop/latitude_3440_ss/%E3%82%B9%E3%83%88%E3%83%AC%E3%83%BC%E3%82%B8?guid=guid-a00459e0-2a64-449c-9f02-581bf2e3c2cf&lang=ja-jp
-
+https://www.dell.com/support/manuals/ja-jp/latitude-14-3440-laptop/latitude_3440_ss/latitude-3440%E3%81%AE%E4%BB%95%E6%A7%98?guid=guid-7c9f07ce-626e-44ca-be3a-a1fb036413f9&lang=ja-jp
 
 ## 1. ベースカバーを外す
 
