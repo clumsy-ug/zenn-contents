@@ -1,14 +1,15 @@
 ---
-title: "Backlogを起点としたループエンジニアリングの構築"
+title: "Backlogに起票したら後は全部Claudeに任せよう"
 emoji: "🔁"
 type: "tech"
-topics: ["loopengineering", "backlog", "teams"]
+topics: ["loopengineering", "claudecode", "backlog", "teams"]
 published: false
 ---
 
-最近社内で Backlog -> Claude Code -> Teams　の流れを繰り返すループエンジニアリングを構築することができたので、その体験記です。
+最近社内で「Backlogにタスクが起票されたら自動で認識して実装からマージ依頼までの諸々を全部Claudeにやらせたいよね」という話が出ました。自分が担当して良い感じに実現できたので、その体験記です。（いわゆるループエンジニアリング）
 
 以下のイメージです。
+図
 
 # 課題
 
@@ -20,7 +21,7 @@ published: false
 
 ## タスクスケジューラで良い
 
-最初はSkillで1分おきにpollingするようなSkillを作ろうと思っていたが、冷静に考えたら単なるcronジョブじゃないかときづき、powershellスクリプトにした。
+最初はSkillで1分おきにpollingするようなSkillを作ろうと思っていたが、冷静に考えたら単なるcronジョブ（タスクスケジューラ）で良いじゃないかときづき、タスクスケジューラでpowershellスクリプトを実行するようにした。
 skillだとclaudeが動くので、1分おきにトークンを消費するというのがアホらしく、考えてみたらシェルで良いじゃんということに気づけたのはよかった。
 
 ## Agent Viewで良い
@@ -31,6 +32,8 @@ Claude Modを使ってQueue画面を作って、herdrでタブ分けて、とい
 今までインタラクティブにforegroundでClaudeと対話してエージェントを動かすのが当たり前だったので、Backgroundで並列で動かすという発想があまりなかったが、Backgroundで良いか、となった。
 しかもBackgroundとはいえAgent Viewで該当セッションを選んで口出したり会話することもできるので、そこは問題なさそう。
 普段の会話はT3 CodeでチャットUIで思う存分並列チャットすれば良い。
+
+※でもやっぱり口出しはCLIでやらないといけないのは嫌だな
 
 # 他の選択肢
 
